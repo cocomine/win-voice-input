@@ -62,6 +62,11 @@ def main() -> int:
         help="Start in idle mode and use Ctrl+Alt+Space to toggle listening.",
     )
     parser.add_argument(
+        "--tray",
+        action="store_true",
+        help="Show a system tray icon with status and Start/Pause/Exit controls.",
+    )
+    parser.add_argument(
         "--command-words",
         action="store_true",
         help="Enable command words like 換行, 逗號, 句號, 刪除.",
@@ -96,6 +101,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.tray and args.hotkey:
+        parser.error("--tray and --hotkey cannot be used together.")
+
     if args.list_devices:
         # Listing devices must not create a Google client or touch Windows
         # clipboard state. It is a read-only diagnostic path for microphone setup.
@@ -118,7 +126,18 @@ def main() -> int:
     )
 
     try:
-        if args.hotkey:
+        if args.tray:
+            # Tray mode owns its own UI loop and also starts a background global
+            # hotkey listener. Importing here keeps non-tray commands usable
+            # without loading tray-only dependencies.
+            from tray_app import TrayDictationApp
+
+            TrayDictationApp(
+                args.language,
+                audio_settings,
+                dictation_settings,
+            ).run()
+        elif args.hotkey:
             # Hotkey mode starts idle and creates a listening session only after
             # Ctrl+Alt+Space. This avoids recording or billing while the user is
             # not actively dictating.

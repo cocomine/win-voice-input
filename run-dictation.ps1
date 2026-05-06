@@ -4,6 +4,7 @@ param(
     [string]$Language = "yue-Hant-HK",
     [int]$Rate = 16000,
     [switch]$ConsoleOnly,
+    [switch]$NoTray,
     [switch]$NoHotkey,
     [switch]$EnableCommandWords,
     [switch]$NoCommandWords,
@@ -45,9 +46,12 @@ if (-not $ConsoleOnly) {
     $arguments += "--paste-final"
 }
 
-# V3 starts idle by default so no microphone audio is sent to Google until the
-# user explicitly presses Ctrl+Alt+Space.
-if (-not $NoHotkey) {
+# V4 uses the system tray by default. Tray mode includes its own hotkey listener
+# and status UI, so the standalone console hotkey flag is only added when tray
+# mode is explicitly disabled.
+if (-not $NoTray) {
+    $arguments += "--tray"
+} elseif (-not $NoHotkey) {
     $arguments += "--hotkey"
 }
 
