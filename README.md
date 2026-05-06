@@ -7,9 +7,11 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Reads audio from your microphone.
 - Streams it to Google Speech-to-Text.
 - Prints interim and final transcripts in the terminal.
+- Pastes final transcripts into the active Windows app.
+- Voice commands are disabled by default, so recognized text is pasted as-is.
 - Defaults to Hong Kong Cantonese: `yue-Hant-HK`.
 
-This first version does not type into other apps yet. It is for checking recognition quality and latency.
+Interim text is only shown in the terminal. Only final text is pasted.
 
 ## Setup
 
@@ -45,6 +47,8 @@ Start listening with the default microphone:
 powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json"
 ```
 
+After it starts, click into Notepad, Word, a browser text box, or any other target app. Final transcripts will be pasted at the current cursor.
+
 Use a specific microphone:
 
 ```powershell
@@ -57,10 +61,34 @@ Use another language:
 powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -Language en-US
 ```
 
+Console-only mode:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -ConsoleOnly
+```
+
 Stop with `Ctrl+C`.
+
+## Optional Spoken Commands
+
+Voice commands are disabled by default. To enable them for a test run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -EnableCommandWords
+```
+
+- `換行` or `新一行` -> newline
+- `逗號` -> `，`
+- `句號` -> `。`
+- `問號` -> `？`
+- `感嘆號` -> `！`
+- `空格` -> space
+- `刪除` or `退格` -> backspace
 
 ## Notes
 
 - Google streaming sessions have time limits, so this prototype is meant for short tests.
 - If your microphone fails at `16000` Hz, try `--rate 48000`.
-- The next version can add a hotkey and paste final text into the active Windows app.
+- Paste mode uses the Windows clipboard, so your clipboard content will be replaced by the latest final transcript.
+- Duplicate protection can be enabled with `-FinalDedupeSeconds 0.8`. The current script default is `0`.
+- The next version can add a global hotkey and a tray icon.
