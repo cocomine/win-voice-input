@@ -17,6 +17,9 @@ from hotkey_app import HotkeyDictationApp
 
 
 def main() -> int:
+    # voice_input.py is intentionally only the command-line entry point. Runtime
+    # behavior is delegated to focused modules so code review can inspect audio,
+    # STT, Windows output, and hotkey control independently.
     parser = argparse.ArgumentParser(
         description="Stream microphone audio to Google Speech-to-Text."
     )
@@ -94,6 +97,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.list_devices:
+        # Listing devices must not create a Google client or touch Windows
+        # clipboard state. It is a read-only diagnostic path for microphone setup.
         print(sd.query_devices())
         return 0
 
@@ -104,6 +109,8 @@ def main() -> int:
     )
     dictation_settings = DictationSettings(
         paste_final=args.paste_final,
+        # Both flags are accepted for CLI clarity, but command words stay off
+        # unless explicitly enabled. --no-command-words wins if both are passed.
         command_words=args.command_words and not args.no_command_words,
         append_space=args.append_space,
         final_dedupe_seconds=args.final_dedupe_seconds,
@@ -112,12 +119,17 @@ def main() -> int:
 
     try:
         if args.hotkey:
+            # Hotkey mode starts idle and creates a listening session only after
+            # Ctrl+Alt+Space. This avoids recording or billing while the user is
+            # not actively dictating.
             HotkeyDictationApp(
                 args.language,
                 audio_settings,
                 dictation_settings,
             ).run()
         else:
+            # Non-hotkey mode preserves the earlier prototype behavior: start a
+            # listening session immediately, useful for quick console tests.
             listen(args.language, audio_settings, dictation_settings)
     except KeyboardInterrupt:
         print("\nStopped.")

@@ -16,6 +16,9 @@ def listen(
     stop_event: threading.Event | None = None,
 ) -> None:
     client = speech.SpeechClient()
+    # Hotkey mode passes in its own event so pressing Ctrl+Alt+Space can stop
+    # this session. Non-hotkey mode still needs a local event so idle timeout can
+    # close the stream without changing the caller's control flow.
     session_stop_event = stop_event if stop_event is not None else threading.Event()
     idle_timer: threading.Timer | None = None
 
@@ -36,6 +39,9 @@ def listen(
     )
 
     if dictation_settings.paste_final:
+        # WindowsTextOutput is created only when paste mode is enabled. Console
+        # mode should remain read-only and must not touch clipboard or keyboard
+        # state.
         print("Listening and pasting final text. Press Ctrl+C to stop.\n")
         text_output = WindowsTextOutput()
     else:
@@ -52,6 +58,8 @@ def listen(
                 dictation_settings.idle_timeout_seconds,
                 session_stop_event.set,
             )
+            # A daemon timer must not keep the process alive after the user exits
+            # the console app. The timer only owns a stop signal, not user data.
             idle_timer.daemon = True
             idle_timer.start()
 
@@ -60,6 +68,9 @@ def listen(
         responses = client.streaming_recognize(
             streaming_config,
             (
+                # Each yielded request contains audio only; recognition settings
+                # stay in streaming_config above. This matches Google's streaming
+                # API shape and keeps request generation free of business logic.
                 speech.StreamingRecognizeRequest(audio_content=content)
                 for content in stream.generator()
             ),
@@ -83,6 +94,10 @@ def listen(
                     continue
 
                 if idle_timer is not None:
+                    # "Input" means Google recognized some text, not raw sound.
+                    # Resetting here lets the app auto-stop after silence or
+                    # unrecognized noise, even though the microphone is still
+                    # producing audio buffers.
                     idle_timer.cancel()
                     idle_timer = threading.Timer(
                         dictation_settings.idle_timeout_seconds,
@@ -116,8 +131,13 @@ def listen(
                     elif text:
                         text_output.paste_text(text)
                 except OSError as exc:
+                    # Paste errors are reported but do not end recognition. A
+                    # transient clipboard lock should not throw away the active
+                    # Google stream; the next final transcript can still paste.
                     print(f"\nPaste warning: {exc}", file=sys.stderr, flush=True)
     finally:
+        # Timers and microphone streams are closed in finally so Ctrl+C, Google
+        # errors, and idle timeout all release the same resources.
         if idle_timer is not None:
             idle_timer.cancel()
         if stream_context is not None:

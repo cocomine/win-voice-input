@@ -29,6 +29,9 @@ class KEYBDINPUT(ctypes.Structure):
 
 
 class MOUSEINPUT(ctypes.Structure):
+    # The mouse and hardware structures are not used directly, but they make the
+    # INPUT union match Win32's real size. Removing them caused SendInput to fail
+    # with WinError 87 on 64-bit Windows.
     _fields_ = [
         ("dx", wintypes.LONG),
         ("dy", wintypes.LONG),
@@ -56,10 +59,15 @@ class INPUT_UNION(ctypes.Union):
 
 
 class INPUT(ctypes.Structure):
+    # Windows validates this full INPUT layout, not just the KEYBDINPUT branch.
+    # On 64-bit Windows ctypes.sizeof(INPUT) should be 40 bytes.
     _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
 
 
 class WindowsTextOutput:
+    # This class owns all Windows clipboard and simulated-keyboard side effects.
+    # Keeping those calls out of the STT session makes it clear exactly where the
+    # app can alter the user's active window or clipboard.
     def __init__(self):
         self._user32 = ctypes.windll.user32
         self._kernel32 = ctypes.windll.kernel32
@@ -96,6 +104,9 @@ class WindowsTextOutput:
         # pasted with Ctrl+V. This avoids per-character keyboard simulation,
         # which is unreliable for IME and CJK input on Windows.
         encoded = text.encode("utf-16le") + b"\x00\x00"
+        # SetClipboardData takes ownership of a movable global-memory handle
+        # after success. Until that point this method remains responsible for
+        # freeing the handle on every error path.
         handle = self._kernel32.GlobalAlloc(GMEM_MOVEABLE, len(encoded))
         if not handle:
             raise ctypes.WinError()
@@ -110,6 +121,9 @@ class WindowsTextOutput:
 
         opened = False
         try:
+            # Windows exposes the clipboard as a process-wide shared resource.
+            # A short bounded retry handles normal contention from other apps
+            # without hiding persistent clipboard failures.
             for _ in range(20):
                 if self._user32.OpenClipboard(None):
                     opened = True
@@ -122,6 +136,9 @@ class WindowsTextOutput:
                 raise ctypes.WinError()
             if not self._user32.SetClipboardData(CF_UNICODETEXT, handle):
                 raise ctypes.WinError()
+            # After SetClipboardData succeeds, Windows owns the memory handle.
+            # Setting it to None prevents the finally block from freeing memory
+            # that no longer belongs to this process.
             handle = None
         finally:
             if opened:
@@ -130,6 +147,8 @@ class WindowsTextOutput:
                 self._kernel32.GlobalFree(handle)
 
         time.sleep(0.08)
+        # Ctrl+V is sent as explicit down/up events in one SendInput batch so the
+        # target app receives a normal paste shortcut rather than raw characters.
         control_down = INPUT(
             type=INPUT_KEYBOARD,
             union=INPUT_UNION(
@@ -155,6 +174,9 @@ class WindowsTextOutput:
             raise ctypes.WinError()
 
     def press_backspace(self) -> None:
+        # Backspace is only used when optional command words are enabled. It is
+        # kept here because simulated keyboard events belong to the same Windows
+        # side-effect boundary as paste_text().
         down = INPUT(
             type=INPUT_KEYBOARD,
             union=INPUT_UNION(ki=KEYBDINPUT(VK_BACK, 0, 0, 0, 0)),

@@ -15,6 +15,8 @@ WM_HOTKEY = 0x0312
 
 
 class POINT(ctypes.Structure):
+    # MSG embeds POINT, so it must be represented even though this app does not
+    # inspect mouse coordinates from the message queue.
     _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
 
 
@@ -33,6 +35,9 @@ class MSG(ctypes.Structure):
 
 
 class HotkeyDictationApp:
+    # The hotkey controller owns session start/stop only. Actual audio capture,
+    # Google streaming, and paste behavior stay in their own modules so review
+    # can verify that pressing the hotkey only controls lifecycle.
     def __init__(
         self,
         language: str,
@@ -84,6 +89,8 @@ class HotkeyDictationApp:
         msg = MSG()
         try:
             while True:
+                # GetMessageW blocks without CPU polling until Windows delivers
+                # a hotkey message or the message queue is told to quit.
                 message_result = self._user32.GetMessageW(
                     ctypes.byref(msg), None, 0, 0
                 )
@@ -113,7 +120,12 @@ class HotkeyDictationApp:
             print("Status: Stopping current dictation session...")
             return
 
+        # Each listening period gets a fresh event. Reusing an already-set event
+        # would make the microphone generator exit immediately on the next start.
         self._stop_event = threading.Event()
+        # The worker thread is the only place that opens the microphone and the
+        # Google stream. The hotkey message loop must remain responsive while
+        # recognition is running.
         self._worker = threading.Thread(target=self.run_listening_session, daemon=True)
         self._worker.start()
         print("Status: Listening. Press Ctrl+Alt+Space to pause.")
@@ -129,4 +141,7 @@ class HotkeyDictationApp:
         except Exception as exc:
             print(f"\nDictation session error: {exc}", file=sys.stderr, flush=True)
         finally:
+            # Returning to Idle here covers both manual pause and auto-stop from
+            # idle timeout, because both end by closing the same listening
+            # session.
             print("Status: Idle. Press Ctrl+Alt+Space to start.")

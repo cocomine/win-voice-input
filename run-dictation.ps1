@@ -13,15 +13,23 @@ param(
 )
 
 if ($Credentials -ne "") {
+    # Google client libraries read this environment variable when creating the
+    # SpeechClient. The script sets it only when the caller provides a path, so
+    # an existing shell-level credential remains usable.
     $env:GOOGLE_APPLICATION_CREDENTIALS = $Credentials
 }
 
 if (-not $env:GOOGLE_APPLICATION_CREDENTIALS) {
+    # Running without credentials would fail later inside the Google client. The
+    # script stops here so the user sees the missing setup step immediately.
     Write-Host "Please set Google credentials first:"
     Write-Host '.\run-dictation.ps1 -Credentials ".\eveapp-320519-17a1cbb68e48.json"'
     exit 1
 }
 
+# Build an argument array instead of a single command string. PowerShell passes
+# each item as one argument, which avoids quoting bugs in file paths and keeps
+# optional flags easy to review.
 $arguments = @(
     ".\voice_input.py",
     "--device", $Device,
