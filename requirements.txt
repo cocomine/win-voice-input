@@ -1,0 +1,2 @@
+google-cloud-speech>=2.31.0
+sounddevice>=0.5.1
