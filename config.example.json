@@ -1,0 +1,13 @@
+{
+  "credentials": ".\\serviceworker.json",
+  "device": null,
+  "language": "yue-Hant-HK",
+  "rate": 16000,
+  "pasteFinal": true,
+  "tray": true,
+  "hotkey": true,
+  "commandWords": false,
+  "appendSpace": false,
+  "finalDedupeSeconds": 0,
+  "idleTimeoutSeconds": 5
+}

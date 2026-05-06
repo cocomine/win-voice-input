@@ -26,6 +26,15 @@ class MicrophoneStream:
         # sounddevice calls _callback from PortAudio's audio thread. The callback
         # must stay lightweight, so it only copies raw bytes into a queue; all
         # Google/network work happens later in generator().
+        if self.settings.device is None:
+            default_device = sd.query_devices(kind="input")
+            print(
+                "Using default input device: "
+                f"{default_device['name']} (index {default_device['index']})"
+            )
+        else:
+            print(f"Using configured input device index: {self.settings.device}")
+
         self.closed = False
         self._stream = sd.RawInputStream(
             samplerate=self.settings.rate,

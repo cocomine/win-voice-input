@@ -9,10 +9,11 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Prints interim and final transcripts in the terminal.
 - Pastes final transcripts into the active Windows app.
 - Shows a system tray icon with Idle / Listening / Stopping status.
-- Uses `mic.svg` in green while listening, and `mic-mute.svg` in white while not listening.
+- Uses `mic.svg` in green while listening, and `mic-mute.svg` in gray while not listening.
 - Uses `Ctrl+Alt+Space` or the tray menu to start or pause listening.
 - Stops the current listening session after 5 seconds without recognized text.
 - Voice commands are disabled by default, so recognized text is pasted as-is.
+- Reads optional settings from `config.json`; without a device setting, it uses the Windows default input device.
 - Defaults to Hong Kong Cantonese: `yue-Hant-HK`.
 
 Interim text is only shown in the terminal. Only final text is pasted.
@@ -49,8 +50,17 @@ This workspace already has a local `.venv` with the dependencies installed, so y
 - `hotkey_app.py` - global `Ctrl+Alt+Space` start/pause control.
 - `tray_app.py` - system tray icon, status display, and tray menu.
 - `text_processing.py` - optional command-word conversion and duplicate filtering.
+- `config.example.json` - optional local settings template.
 
 ## Run
+
+Daily use with `config.json`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1
+```
+
+Create `config.json` by copying `config.example.json`, then edit values you want to remember. If `device` is `null` or missing, the app uses the Windows default input device.
 
 List microphones:
 
@@ -65,6 +75,8 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 ```
 
 After it starts, a tray icon appears in the Windows notification area. Click into Notepad, Word, a browser text box, or any other target app. Press `Ctrl+Alt+Space` or use the tray menu to start listening. Press `Ctrl+Alt+Space` again, or choose Pause from the tray menu, to stop the current session.
+
+On startup, the console prints the input device it will use. If no device is configured, it prints the current Windows default input device.
 
 While paused, the app does not record microphone audio and does not send audio to Google.
 
@@ -131,4 +143,4 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 - Paste mode uses the Windows clipboard, so your clipboard content will be replaced by the latest final transcript.
 - Duplicate protection can be enabled with `-FinalDedupeSeconds 0.8`. The current script default is `0`.
 - Idle auto-stop is enabled by default with `-IdleTimeoutSeconds 5`; use `0` to disable it.
-- The next version can add a settings file and package the app as an `.exe`.
+- The next version can package the app as an `.exe`.
