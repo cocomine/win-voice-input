@@ -8,7 +8,8 @@ param(
     [switch]$EnableCommandWords,
     [switch]$NoCommandWords,
     [switch]$AppendSpace,
-    [double]$FinalDedupeSeconds = 0
+    [double]$FinalDedupeSeconds = 0,
+    [double]$IdleTimeoutSeconds = 5
 )
 
 if ($Credentials -ne "") {
@@ -26,7 +27,8 @@ $arguments = @(
     "--device", $Device,
     "--language", $Language,
     "--rate", $Rate,
-    "--final-dedupe-seconds", $FinalDedupeSeconds
+    "--final-dedupe-seconds", $FinalDedupeSeconds,
+    "--idle-timeout-seconds", $IdleTimeoutSeconds
 )
 
 # Paste mode remains separate from hotkey mode: hotkey controls when audio is

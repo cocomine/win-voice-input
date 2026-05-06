@@ -9,6 +9,7 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Prints interim and final transcripts in the terminal.
 - Pastes final transcripts into the active Windows app.
 - Starts idle and uses `Ctrl+Alt+Space` to start or pause listening.
+- Stops the current listening session after 5 seconds without recognized text.
 - Voice commands are disabled by default, so recognized text is pasted as-is.
 - Defaults to Hong Kong Cantonese: `yue-Hant-HK`.
 
@@ -62,6 +63,8 @@ After it starts, click into Notepad, Word, a browser text box, or any other targ
 
 While paused, the app does not record microphone audio and does not send audio to Google.
 
+If Google Speech-to-Text does not return any recognized text for 5 seconds, the current listening session stops automatically and returns to idle.
+
 Use a specific microphone:
 
 ```powershell
@@ -84,6 +87,12 @@ Start immediately without the global hotkey:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -NoHotkey
+```
+
+Change the idle timeout:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -IdleTimeoutSeconds 8
 ```
 
 Stop with `Ctrl+C`.
@@ -110,4 +119,5 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 - If your microphone fails at `16000` Hz, try `--rate 48000`.
 - Paste mode uses the Windows clipboard, so your clipboard content will be replaced by the latest final transcript.
 - Duplicate protection can be enabled with `-FinalDedupeSeconds 0.8`. The current script default is `0`.
+- Idle auto-stop is enabled by default with `-IdleTimeoutSeconds 5`; use `0` to disable it.
 - The next version can add a tray icon and settings file.

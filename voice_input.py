@@ -6,6 +6,7 @@ import sounddevice as sd
 from app_config import (
     DEFAULT_CHUNK_MS,
     DEFAULT_FINAL_DEDUPE_SECONDS,
+    DEFAULT_IDLE_TIMEOUT_SECONDS,
     DEFAULT_LANGUAGE,
     DEFAULT_RATE,
     AudioSettings,
@@ -81,6 +82,15 @@ def main() -> int:
             f"seconds. Default: {DEFAULT_FINAL_DEDUPE_SECONDS}"
         ),
     )
+    parser.add_argument(
+        "--idle-timeout-seconds",
+        type=float,
+        default=DEFAULT_IDLE_TIMEOUT_SECONDS,
+        help=(
+            "Stop the current listening session after this many seconds with "
+            f"no recognized text. Use 0 to disable. Default: {DEFAULT_IDLE_TIMEOUT_SECONDS}"
+        ),
+    )
     args = parser.parse_args()
 
     if args.list_devices:
@@ -97,6 +107,7 @@ def main() -> int:
         command_words=args.command_words and not args.no_command_words,
         append_space=args.append_space,
         final_dedupe_seconds=args.final_dedupe_seconds,
+        idle_timeout_seconds=args.idle_timeout_seconds,
     )
 
     try:

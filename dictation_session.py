@@ -16,6 +16,8 @@ def listen(
     stop_event: threading.Event | None = None,
 ) -> None:
     client = speech.SpeechClient()
+    session_stop_event = stop_event if stop_event is not None else threading.Event()
+    idle_timer: threading.Timer | None = None
 
     # Google streaming recognition expects the first request metadata through
     # StreamingRecognitionConfig, then a continuous iterator of audio-content
@@ -42,7 +44,18 @@ def listen(
 
     stream_context = None
     try:
-        stream_context = MicrophoneStream(audio_settings, stop_event)
+        if dictation_settings.idle_timeout_seconds > 0:
+            # The timeout is based on recognized text rather than raw microphone
+            # buffers. A silent microphone still produces audio chunks, so raw
+            # audio activity would never mean "the user is dictating".
+            idle_timer = threading.Timer(
+                dictation_settings.idle_timeout_seconds,
+                session_stop_event.set,
+            )
+            idle_timer.daemon = True
+            idle_timer.start()
+
+        stream_context = MicrophoneStream(audio_settings, session_stop_event)
         stream = stream_context.__enter__()
         responses = client.streaming_recognize(
             streaming_config,
@@ -56,7 +69,7 @@ def listen(
         )
 
         for response in responses:
-            if stop_event is not None and stop_event.is_set():
+            if session_stop_event.is_set():
                 break
             if not response.results:
                 continue
@@ -68,6 +81,15 @@ def listen(
                 transcript = result.alternatives[0].transcript.strip()
                 if not transcript:
                     continue
+
+                if idle_timer is not None:
+                    idle_timer.cancel()
+                    idle_timer = threading.Timer(
+                        dictation_settings.idle_timeout_seconds,
+                        session_stop_event.set,
+                    )
+                    idle_timer.daemon = True
+                    idle_timer.start()
 
                 prefix = "FINAL" if result.is_final else "..."
                 end = "\n" if result.is_final else "\r"
@@ -96,5 +118,7 @@ def listen(
                 except OSError as exc:
                     print(f"\nPaste warning: {exc}", file=sys.stderr, flush=True)
     finally:
+        if idle_timer is not None:
+            idle_timer.cancel()
         if stream_context is not None:
             stream_context.__exit__(*sys.exc_info())

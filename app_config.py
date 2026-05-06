@@ -5,6 +5,7 @@ DEFAULT_LANGUAGE = "yue-Hant-HK"
 DEFAULT_RATE = 16000
 DEFAULT_CHUNK_MS = 100
 DEFAULT_FINAL_DEDUPE_SECONDS = 0.8
+DEFAULT_IDLE_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -20,3 +21,4 @@ class DictationSettings:
     command_words: bool
     append_space: bool
     final_dedupe_seconds: float
+    idle_timeout_seconds: float
