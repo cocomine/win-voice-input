@@ -1,8 +1,12 @@
 import sys
 import threading
+from io import BytesIO
+from pathlib import Path
 
 import pystray
-from PIL import Image, ImageDraw
+from PIL import Image
+from reportlab.graphics import renderPM
+from svglib.svglib import svg2rlg
 
 from app_config import AudioSettings, DictationSettings
 from dictation_controller import DictationController
@@ -13,6 +17,8 @@ class TrayDictationApp:
     # The tray app is a UI shell around DictationController. It does not own
     # microphone, Google STT, or paste logic; it only exposes Start/Pause/Exit
     # controls and mirrors controller status into the icon and menu.
+    ICON_SIZE = 64
+
     def __init__(
         self,
         language: str,
@@ -28,10 +34,15 @@ class TrayDictationApp:
         self.hotkey_listener = GlobalHotkeyListener()
         self.icon: pystray.Icon | None = None
         self._hotkey_thread: threading.Thread | None = None
+        project_dir = Path(__file__).resolve().parent
+        muted_icon = self._render_svg_icon(
+            project_dir / "mic-mute.svg",
+            "#ffffff",
+        )
         self._images = {
-            "Idle": self._create_status_image((115, 115, 115)),
-            "Listening": self._create_status_image((20, 170, 85)),
-            "Stopping": self._create_status_image((230, 160, 35)),
+            "Idle": muted_icon,
+            "Listening": self._render_svg_icon(project_dir / "mic.svg", "#20AA55"),
+            "Stopping": muted_icon,
         }
 
     def run(self) -> None:
@@ -110,13 +121,42 @@ class TrayDictationApp:
         self.icon.title = f"Win Voice Input - {status}"
         self.icon.update_menu()
 
-    def _create_status_image(self, color: tuple[int, int, int]) -> Image.Image:
-        # The icon is generated at runtime to avoid adding binary assets. A
-        # simple colored circle is enough for state recognition in the tray:
-        # gray=Idle, green=Listening, amber=Stopping.
-        image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(image)
-        draw.ellipse((8, 8, 56, 56), fill=color, outline=(30, 30, 30), width=4)
-        draw.rectangle((28, 18, 36, 46), fill=(255, 255, 255, 230))
-        draw.rectangle((20, 38, 44, 46), fill=(255, 255, 255, 230))
-        return image
+    def _render_svg_icon(self, svg_path: Path, color: str) -> Image.Image:
+        # The user-provided SVG files are the source of truth for tray artwork.
+        # They use currentColor, so recoloring is done by replacing that token
+        # before rendering. Missing or unsupported SVG files should raise clear
+        # errors instead of silently switching to a different icon.
+        try:
+            svg_text = svg_path.read_text(encoding="utf-8").replace(
+                "currentColor",
+                color,
+            )
+        except OSError as exc:
+            # The SVG files are required assets, not optional decoration. If
+            # they are missing or unreadable, fail with a message that tells the
+            # user exactly which project files must be checked.
+            raise RuntimeError(
+                f"Required tray icon SVG is missing or inaccessible: {svg_path}. "
+                "Ensure mic.svg and mic-mute.svg are in the project folder."
+            ) from exc
+        drawing = svg2rlg(BytesIO(svg_text.encode("utf-8")))
+        if drawing is None:
+            raise ValueError(f"Unable to render SVG icon: {svg_path}")
+
+        # The source icons are 16x16. Scaling the ReportLab drawing before
+        # rasterizing keeps the tray image crisp at the size expected by
+        # pystray on high-DPI Windows displays.
+        drawing.scale(
+            self.ICON_SIZE / drawing.width,
+            self.ICON_SIZE / drawing.height,
+        )
+        drawing.width = self.ICON_SIZE
+        drawing.height = self.ICON_SIZE
+
+        png_bytes = renderPM.drawToString(
+            drawing,
+            fmt="PNG",
+            bg=None,
+            backendFmt="RGBA",
+        )
+        return Image.open(BytesIO(png_bytes)).convert("RGBA")
