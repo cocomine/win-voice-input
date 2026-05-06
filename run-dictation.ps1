@@ -4,6 +4,7 @@ param(
     [string]$Language = "yue-Hant-HK",
     [int]$Rate = 16000,
     [switch]$ConsoleOnly,
+    [switch]$NoHotkey,
     [switch]$EnableCommandWords,
     [switch]$NoCommandWords,
     [switch]$AppendSpace,
@@ -28,8 +29,16 @@ $arguments = @(
     "--final-dedupe-seconds", $FinalDedupeSeconds
 )
 
+# Paste mode remains separate from hotkey mode: hotkey controls when audio is
+# streamed to Google, while paste mode controls where final transcripts go.
 if (-not $ConsoleOnly) {
     $arguments += "--paste-final"
+}
+
+# V3 starts idle by default so no microphone audio is sent to Google until the
+# user explicitly presses Ctrl+Alt+Space.
+if (-not $NoHotkey) {
+    $arguments += "--hotkey"
 }
 
 if ($EnableCommandWords) {
