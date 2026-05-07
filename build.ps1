@@ -6,8 +6,8 @@ $ErrorActionPreference = "Stop"
 $env:PYGAME_HIDE_SUPPORT_PROMPT = "1"
 
 # Build always runs from the project folder so PyInstaller can resolve source
-# files and bundled tray SVG assets in a predictable way, no matter which folder
-# PowerShell was opened from.
+# files and bundled tray/status assets in a predictable way, no matter which
+# folder PowerShell was opened from.
 Set-Location -LiteralPath $PSScriptRoot
 
 $pythonExe = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"

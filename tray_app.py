@@ -9,7 +9,7 @@ from PIL import Image
 from reportlab.graphics import renderPM
 from svglib.svglib import svg2rlg
 
-from app_config import AudioSettings, DictationSettings
+from app_config import AudioSettings, DictationSettings, FeedbackSettings
 from dictation_controller import DictationController
 from global_hotkey import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
 from listening_indicator import ListeningIndicator
@@ -36,15 +36,21 @@ class TrayDictationApp:
         language: str,
         audio_settings: AudioSettings,
         dictation_settings: DictationSettings,
+        feedback_settings: FeedbackSettings,
     ):
         self.controller = DictationController(
             language,
             audio_settings,
             dictation_settings,
+            feedback_settings,
             self._on_status_change,
         )
         self.hotkey_listener = GlobalHotkeyListener()
-        self.listening_indicator = ListeningIndicator()
+        self.listening_indicator = (
+            ListeningIndicator(feedback_settings.listening_indicator_position)
+            if feedback_settings.show_listening_indicator
+            else None
+        )
         self.icon: pystray.Icon | None = None
         self._hotkey_thread: threading.Thread | None = None
         # PyInstaller unpacks bundled data files into sys._MEIPASS. Source runs
@@ -160,16 +166,18 @@ class TrayDictationApp:
 
     def _on_exit(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         self.controller.shutdown()
-        self.listening_indicator.shutdown()
+        if self.listening_indicator is not None:
+            self.listening_indicator.shutdown()
         self.hotkey_listener.stop()
         icon.stop()
 
     def _on_status_change(self, status: str) -> None:
         print(f"Status: {status}")
-        if status == "Listening":
-            self.listening_indicator.show()
-        else:
-            self.listening_indicator.hide()
+        if self.listening_indicator is not None:
+            if status == "Listening":
+                self.listening_indicator.show()
+            else:
+                self.listening_indicator.hide()
 
         if self.icon is None:
             return

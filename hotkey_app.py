@@ -1,4 +1,4 @@
-from app_config import AudioSettings, DictationSettings
+from app_config import AudioSettings, DictationSettings, FeedbackSettings
 from dictation_controller import DictationController
 from global_hotkey import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
 from listening_indicator import ListeningIndicator
@@ -13,15 +13,21 @@ class HotkeyDictationApp:
         language: str,
         audio_settings: AudioSettings,
         dictation_settings: DictationSettings,
+        feedback_settings: FeedbackSettings,
     ):
         self.controller = DictationController(
             language,
             audio_settings,
             dictation_settings,
+            feedback_settings,
             self._on_status_change,
         )
         self.hotkey_listener = GlobalHotkeyListener()
-        self.listening_indicator = ListeningIndicator()
+        self.listening_indicator = (
+            ListeningIndicator(feedback_settings.listening_indicator_position)
+            if feedback_settings.show_listening_indicator
+            else None
+        )
 
     def run(self) -> None:
         print(f"Status: Idle. Press {HOTKEY_DISPLAY_NAME} to start or pause.")
@@ -31,15 +37,19 @@ class HotkeyDictationApp:
             self.hotkey_listener.run(self.controller.toggle)
         finally:
             self.controller.shutdown()
-            self.listening_indicator.shutdown()
+            if self.listening_indicator is not None:
+                self.listening_indicator.shutdown()
 
     def _on_status_change(self, status: str) -> None:
         if status == "Listening":
-            self.listening_indicator.show()
+            if self.listening_indicator is not None:
+                self.listening_indicator.show()
             print(f"Status: Listening. Press {HOTKEY_DISPLAY_NAME} to pause.")
         elif status == "Stopping":
-            self.listening_indicator.hide()
+            if self.listening_indicator is not None:
+                self.listening_indicator.hide()
             print("Status: Stopping current dictation session...")
         elif status == "Idle":
-            self.listening_indicator.hide()
+            if self.listening_indicator is not None:
+                self.listening_indicator.hide()
             print(f"Status: Idle. Press {HOTKEY_DISPLAY_NAME} to start.")

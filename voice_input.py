@@ -7,13 +7,18 @@ from pathlib import Path
 import sounddevice as sd
 
 from app_config import (
+    ALLOWED_LISTENING_INDICATOR_POSITIONS,
     DEFAULT_CHUNK_MS,
     DEFAULT_FINAL_DEDUPE_SECONDS,
     DEFAULT_IDLE_TIMEOUT_SECONDS,
     DEFAULT_LANGUAGE,
+    DEFAULT_LISTENING_INDICATOR_POSITION,
+    DEFAULT_PLAY_STATUS_SOUNDS,
     DEFAULT_RATE,
+    DEFAULT_SHOW_LISTENING_INDICATOR,
     AudioSettings,
     DictationSettings,
+    FeedbackSettings,
 )
 from dictation_session import listen
 from global_hotkey import HOTKEY_DISPLAY_NAME
@@ -204,6 +209,9 @@ def main() -> int:
         "append_space": False,
         "final_dedupe_seconds": DEFAULT_FINAL_DEDUPE_SECONDS,
         "idle_timeout_seconds": DEFAULT_IDLE_TIMEOUT_SECONDS,
+        "play_status_sounds": DEFAULT_PLAY_STATUS_SOUNDS,
+        "show_listening_indicator": DEFAULT_SHOW_LISTENING_INDICATOR,
+        "listening_indicator_position": DEFAULT_LISTENING_INDICATOR_POSITION,
     }
 
     if config_path.exists():
@@ -231,6 +239,9 @@ def main() -> int:
             "appendSpace": "append_space",
             "finalDedupeSeconds": "final_dedupe_seconds",
             "idleTimeoutSeconds": "idle_timeout_seconds",
+            "playStatusSounds": "play_status_sounds",
+            "showListeningIndicator": "show_listening_indicator",
+            "listeningIndicatorPosition": "listening_indicator_position",
         }
         for config_name, setting_name in config_fields.items():
             if config_name in config_data:
@@ -284,6 +295,19 @@ def main() -> int:
     if args.idle_timeout_seconds is not None:
         settings["idle_timeout_seconds"] = args.idle_timeout_seconds
 
+    listening_indicator_position = str(
+        settings["listening_indicator_position"]
+    ).strip().lower()
+    if listening_indicator_position not in ALLOWED_LISTENING_INDICATOR_POSITIONS:
+        allowed_positions = ", ".join(ALLOWED_LISTENING_INDICATOR_POSITIONS)
+        print(
+            "\nError: Invalid listeningIndicatorPosition in config.json: "
+            f"{settings['listening_indicator_position']!r}. Expected one of: "
+            f"{allowed_positions}.",
+            file=sys.stderr,
+        )
+        return 1
+
     audio_settings = AudioSettings(
         rate=int(settings["rate"]),
         chunk_ms=int(settings["chunk_ms"]),
@@ -300,6 +324,14 @@ def main() -> int:
         final_dedupe_seconds=float(settings["final_dedupe_seconds"]),
         idle_timeout_seconds=float(settings["idle_timeout_seconds"]),
     )
+    feedback_settings = FeedbackSettings(
+        # Feedback settings are read from config.json only for now. Keeping them
+        # out of the PowerShell flags avoids changing the existing launch
+        # surface while still letting packaged exe users tune daily behavior.
+        play_status_sounds=bool(settings["play_status_sounds"]),
+        show_listening_indicator=bool(settings["show_listening_indicator"]),
+        listening_indicator_position=listening_indicator_position,
+    )
 
     try:
         if settings["tray"]:
@@ -312,6 +344,7 @@ def main() -> int:
                 str(settings["language"]),
                 audio_settings,
                 dictation_settings,
+                feedback_settings,
             ).run()
         elif settings["hotkey"]:
             # Hotkey mode starts idle and creates a listening session only after
@@ -321,6 +354,7 @@ def main() -> int:
                 str(settings["language"]),
                 audio_settings,
                 dictation_settings,
+                feedback_settings,
             ).run()
         else:
             # Non-hotkey mode preserves the earlier prototype behavior: start a

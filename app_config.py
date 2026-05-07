@@ -8,6 +8,17 @@ DEFAULT_RATE = 16000
 DEFAULT_CHUNK_MS = 100
 DEFAULT_FINAL_DEDUPE_SECONDS = 0.8
 DEFAULT_IDLE_TIMEOUT_SECONDS = 5.0
+DEFAULT_PLAY_STATUS_SOUNDS = True
+DEFAULT_SHOW_LISTENING_INDICATOR = True
+DEFAULT_LISTENING_INDICATOR_POSITION = "bottom-center"
+ALLOWED_LISTENING_INDICATOR_POSITIONS = (
+    "bottom-center",
+    "bottom-left",
+    "bottom-right",
+    "top-center",
+    "top-left",
+    "top-right",
+)
 
 
 @dataclass(frozen=True)
@@ -29,3 +40,13 @@ class DictationSettings:
     append_space: bool
     final_dedupe_seconds: float
     idle_timeout_seconds: float
+
+
+@dataclass(frozen=True)
+class FeedbackSettings:
+    # Feedback settings control user cues around the dictation lifecycle. They
+    # are separate from DictationSettings because they should not affect what
+    # audio is sent to Google or what text is pasted.
+    play_status_sounds: bool
+    show_listening_indicator: bool
+    listening_indicator_position: str

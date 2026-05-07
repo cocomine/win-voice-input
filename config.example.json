@@ -9,5 +9,8 @@
   "commandWords": false,
   "appendSpace": false,
   "finalDedupeSeconds": 0,
-  "idleTimeoutSeconds": 5
+  "idleTimeoutSeconds": 5,
+  "playStatusSounds": true,
+  "showListeningIndicator": true,
+  "listeningIndicatorPosition": "bottom-center"
 }

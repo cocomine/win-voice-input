@@ -72,6 +72,13 @@ Shortcut note: current builds use `Ctrl+Alt+V`. Earlier test builds used
 
 Create `config.json` by copying `config.example.json`, then edit values you want to remember. If `device` is `null` or missing, the app uses the Windows default input device.
 
+Common `config.json` settings:
+
+- `idleTimeoutSeconds`: seconds without recognized text before listening stops. Use `0` to disable.
+- `playStatusSounds`: `true` plays `start.mp3` and `end.mp3`; `false` keeps state changes silent.
+- `showListeningIndicator`: `true` shows the floating listening status window; `false` hides it.
+- `listeningIndicatorPosition`: `bottom-center`, `bottom-left`, `bottom-right`, `top-center`, `top-left`, or `top-right`.
+
 List microphones:
 
 ```powershell

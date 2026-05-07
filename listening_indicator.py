@@ -11,6 +11,10 @@ from PIL import Image, ImageDraw, ImageFont
 from reportlab.graphics import renderPM
 from svglib.svglib import svg2rlg
 
+from app_config import (
+    ALLOWED_LISTENING_INDICATOR_POSITIONS,
+    DEFAULT_LISTENING_INDICATOR_POSITION,
+)
 from win32_message_types import MSG, POINT
 
 LRESULT = wintypes.LPARAM
@@ -114,7 +118,7 @@ class ListeningIndicator:
     # reliable Windows caret position.
     WINDOW_WIDTH = 176
     WINDOW_HEIGHT = 56
-    WORK_AREA_BOTTOM_GAP_PX = 24
+    WORK_AREA_EDGE_GAP_PX = 24
     TIMER_ID = 1
     # The status window is fixed near the taskbar, so 120ms is responsive
     # enough for start/stop visibility without unnecessary timer wakeups.
@@ -160,7 +164,20 @@ class ListeningIndicator:
     AC_SRC_ALPHA = 1
     ULW_ALPHA = 0x00000002
 
-    def __init__(self):
+    def __init__(
+        self,
+        position: str = DEFAULT_LISTENING_INDICATOR_POSITION,
+    ):
+        normalized_position = str(position).strip().lower()
+        if normalized_position not in ALLOWED_LISTENING_INDICATOR_POSITIONS:
+            allowed_positions = ", ".join(ALLOWED_LISTENING_INDICATOR_POSITIONS)
+            raise ValueError(
+                "Invalid listening indicator position: "
+                f"{position!r}. Expected one of: {allowed_positions}."
+            )
+        # Position names are validated once at construction so the timer path
+        # can stay simple; _update_window only translates the anchor into x/y.
+        self.position = normalized_position
         self._visible_event = threading.Event()
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
@@ -589,8 +606,21 @@ class ListeningIndicator:
             raise ctypes.WinError()
 
         work_width = work_area.right - work_area.left
-        x = work_area.left + ((work_width - self.WINDOW_WIDTH) // 2)
-        y = work_area.bottom - self.WINDOW_HEIGHT - self.WORK_AREA_BOTTOM_GAP_PX
+        # The configured position is an anchor inside the Windows work area,
+        # which excludes the taskbar. This keeps the status window visible
+        # without relying on browser/editor caret reporting.
+        if self.position.endswith("left"):
+            x = work_area.left + self.WORK_AREA_EDGE_GAP_PX
+        elif self.position.endswith("right"):
+            x = work_area.right - self.WINDOW_WIDTH - self.WORK_AREA_EDGE_GAP_PX
+        else:
+            x = work_area.left + ((work_width - self.WINDOW_WIDTH) // 2)
+
+        if self.position.startswith("top"):
+            y = work_area.top + self.WORK_AREA_EDGE_GAP_PX
+        else:
+            y = work_area.bottom - self.WINDOW_HEIGHT - self.WORK_AREA_EDGE_GAP_PX
+
         self._show_layered_window(x, y)
 
     def _show_layered_window(self, x: int, y: int) -> None:

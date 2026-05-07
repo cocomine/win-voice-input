@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app_config import AudioSettings, DictationSettings
+from app_config import AudioSettings, DictationSettings, FeedbackSettings
 from dictation_session import listen
 
 if TYPE_CHECKING:
@@ -29,42 +29,57 @@ class DictationController:
         language: str,
         audio_settings: AudioSettings,
         dictation_settings: DictationSettings,
+        feedback_settings: FeedbackSettings,
         on_status_change: StatusCallback | None = None,
     ):
         self.language = language
         self.audio_settings = audio_settings
         self.dictation_settings = dictation_settings
+        self.feedback_settings = feedback_settings
         self.on_status_change = on_status_change
         self.status = "Idle"
-        asset_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-        # Status sounds are required user-facing cues. They are resolved during
-        # controller setup so a missing packaged asset fails before the user
-        # starts dictation and wonders why no state sound is played.
-        self._start_sound_path = self._resolve_required_asset(asset_dir, "start.mp3")
-        self._end_sound_path = self._resolve_required_asset(asset_dir, "end.mp3")
-        # pygame is imported only when a controller is created. Diagnostic CLI
-        # paths such as --help and --list-devices therefore stay lightweight,
-        # while real dictation modes fail early if the required audio playback
-        # dependency is not installed.
-        try:
-            import pygame
-        except ImportError as exc:
-            raise RuntimeError(
-                "pygame is required for start/end status sounds. "
-                "Install runtime dependencies from requirements.txt."
-            ) from exc
+        self._sound_error: type[Exception] | None = None
+        self._start_sound: "pygame.mixer.Sound | None" = None
+        self._end_sound: "pygame.mixer.Sound | None" = None
+        if self.feedback_settings.play_status_sounds:
+            asset_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+            # Status sounds are required only when enabled. They are resolved
+            # during controller setup so a missing packaged asset fails before
+            # the user starts dictation and wonders why no state sound is played.
+            self._start_sound_path = self._resolve_required_asset(
+                asset_dir,
+                "start.mp3",
+            )
+            self._end_sound_path = self._resolve_required_asset(
+                asset_dir,
+                "end.mp3",
+            )
+            # pygame is imported only when status sounds are enabled. Diagnostic
+            # CLI paths such as --help and --list-devices therefore stay
+            # lightweight, and users who disable sounds do not need audio mixer
+            # setup for the controller to start.
+            try:
+                import pygame
+            except ImportError as exc:
+                raise RuntimeError(
+                    "pygame is required for start/end status sounds. "
+                    "Install runtime dependencies from requirements.txt or set "
+                    "playStatusSounds to false in config.json."
+                ) from exc
 
-        self._mixer = pygame.mixer
-        self._sound_error = pygame.error
-        try:
-            if self._mixer.get_init() is None:
-                self._mixer.init()
-            self._start_sound = self._mixer.Sound(str(self._start_sound_path))
-            self._end_sound = self._mixer.Sound(str(self._end_sound_path))
-        except pygame.error as exc:
-            raise RuntimeError(
-                "Failed to initialize or load start.mp3/end.mp3 status sounds."
-            ) from exc
+            self._mixer = pygame.mixer
+            self._sound_error = pygame.error
+            try:
+                if self._mixer.get_init() is None:
+                    self._mixer.init()
+                self._start_sound = self._mixer.Sound(str(self._start_sound_path))
+                self._end_sound = self._mixer.Sound(str(self._end_sound_path))
+            except pygame.error as exc:
+                raise RuntimeError(
+                    "Failed to initialize or load start.mp3/end.mp3 status "
+                    "sounds. Check the sound files or set playStatusSounds to "
+                    "false in config.json."
+                ) from exc
 
         self._lock = threading.Lock()
         self._stop_event: threading.Event | None = None
@@ -137,6 +152,9 @@ class DictationController:
         # The cues are tied to actual lifecycle transitions, not button clicks.
         # That makes hotkey starts, tray starts, manual pauses, and idle-timeout
         # auto-stops all use the same audible status language.
+        if not self.feedback_settings.play_status_sounds:
+            return
+
         if status == "Listening":
             self._play_status_sound(self._start_sound)
         elif previous_status == "Listening" and status != "Listening":
@@ -151,11 +169,14 @@ class DictationController:
             )
         return asset_path
 
-    def _play_status_sound(self, sound: "pygame.mixer.Sound") -> None:
+    def _play_status_sound(self, sound: "pygame.mixer.Sound | None") -> None:
         # Sound.play() is asynchronous, so the UI and microphone control do not
         # wait for the cue to finish. Playback is a user cue, not the dictation
         # state machine itself, so a temporary audio-channel issue is reported
         # without stopping microphone control or Google STT.
+        if sound is None or self._sound_error is None:
+            return
+
         try:
             channel = sound.play()
         except self._sound_error as exc:
