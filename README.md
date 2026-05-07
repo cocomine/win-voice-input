@@ -9,7 +9,7 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Prints interim and final transcripts in the terminal.
 - Pastes final transcripts into the active Windows app.
 - Shows a system tray icon with Idle / Listening / Stopping status.
-- Shows a small listening indicator near the active text caret while listening.
+- Shows a small listening status window while listening.
 - Uses `mic.svg` in green while listening, and automatically recolors `mic-mute.svg` for Windows light or dark system UI while not listening.
 - Plays `start.mp3` when listening begins and `end.mp3` when listening stops.
 - Uses `Ctrl+Alt+V` or the tray menu to start or pause listening.
@@ -52,7 +52,7 @@ This workspace already has a local `.venv` with the dependencies installed, so y
 - `global_hotkey.py` - global `Ctrl+Alt+V` Win32 hotkey listener.
 - `hotkey_app.py` - global `Ctrl+Alt+V` start/pause control.
 - `tray_app.py` - system tray icon, status display, and tray menu.
-- `listening_indicator.py` - floating listening indicator near the active Windows caret.
+- `listening_indicator.py` - floating listening status window.
 - `text_processing.py` - optional command-word conversion and duplicate filtering.
 - `config.example.json` - optional local settings template.
 - `mic.svg`, `mic-mute.svg`, `start.mp3`, `end.mp3` - required tray/status assets.
@@ -124,8 +124,9 @@ While paused, the app does not record microphone audio and does not send audio t
 
 If Google Speech-to-Text does not return any recognized text for 5 seconds, the current listening session stops automatically and returns to idle.
 
-While listening, a small blue microphone indicator follows the active Windows
-text caret when the focused app exposes a system caret location.
+While listening, a small status window appears near the bottom center of the
+desktop work area. It does not depend on the active app exposing a Windows
+caret, so it remains visible in browser-rendered text fields as well as Notepad.
 
 Use a specific microphone:
 

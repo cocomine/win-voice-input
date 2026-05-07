@@ -11,8 +11,8 @@ UINT_PTR = wintypes.WPARAM
 
 
 class RECT(ctypes.Structure):
-    # GUITHREADINFO returns the caret rectangle as a Win32 RECT. The indicator
-    # uses the caret's lower-left point as the anchor for the listening bubble.
+    # RECT is used both by SystemParametersInfoW to describe the desktop work
+    # area and by GDI drawing calls to describe the status window paint region.
     _fields_ = [
         ("left", wintypes.LONG),
         ("top", wintypes.LONG),
@@ -21,26 +21,9 @@ class RECT(ctypes.Structure):
     ]
 
 
-class GUITHREADINFO(ctypes.Structure):
-    # Microsoft documents rcCaret as client coordinates relative to hwndCaret,
-    # so the value must be converted with ClientToScreen before the overlay is
-    # positioned on the desktop.
-    _fields_ = [
-        ("cbSize", wintypes.DWORD),
-        ("flags", wintypes.DWORD),
-        ("hwndActive", wintypes.HWND),
-        ("hwndFocus", wintypes.HWND),
-        ("hwndCapture", wintypes.HWND),
-        ("hwndMenuOwner", wintypes.HWND),
-        ("hwndMoveSize", wintypes.HWND),
-        ("hwndCaret", wintypes.HWND),
-        ("rcCaret", RECT),
-    ]
-
-
 class PAINTSTRUCT(ctypes.Structure):
-    # BeginPaint fills this structure while handling WM_PAINT. The overlay draws
-    # its own icon, so it uses only hdc and rcPaint.
+    # BeginPaint fills this structure while handling WM_PAINT. The listening
+    # status window draws its own panel, icon, and text, so it uses hdc/rcPaint.
     _fields_ = [
         ("hdc", wintypes.HDC),
         ("fErase", wintypes.BOOL),
@@ -62,7 +45,7 @@ WindowProcedure = ctypes.WINFUNCTYPE(
 
 class WNDCLASSEXW(ctypes.Structure):
     # RegisterClassExW needs a WNDCLASSEXW definition before CreateWindowExW can
-    # create the transparent indicator window.
+    # create the listening status window.
     _fields_ = [
         ("cbSize", wintypes.UINT),
         ("style", wintypes.UINT),
@@ -81,42 +64,48 @@ class WNDCLASSEXW(ctypes.Structure):
 
 class ListeningIndicator:
     # The indicator is a visual status cue shown only during active listening.
-    # It is implemented with Win32 instead of Tkinter because the bundled Python
-    # runtime used by this project does not include Tcl/Tk files reliably.
-    WINDOW_SIZE = 48
-    CARET_GAP_PX = 8
+    # It is a small independent Win32 status window rather than a caret overlay:
+    # browser-rendered text fields often draw their own caret and do not expose
+    # a reliable system caret position, while a separate window remains visible
+    # across Notepad, browsers, and other app-rendered input surfaces.
+    WINDOW_WIDTH = 176
+    WINDOW_HEIGHT = 56
+    WORK_AREA_BOTTOM_GAP_PX = 24
     TIMER_ID = 1
-    POLL_INTERVAL_MS = 80
+    POLL_INTERVAL_MS = 120
     STARTUP_TIMEOUT_SECONDS = 5
     SHUTDOWN_TIMEOUT_SECONDS = 2
     CLASS_NAME = "WinVoiceInputListeningIndicator"
+    STATUS_TEXT = "Listening"
 
     # Win32 COLORREF values are 0x00BBGGRR, not RGB. The constants below are:
-    # magenta transparency key, blue bubble fill, pale-blue outline, and white
-    # microphone glyph. Keeping that convention documented prevents accidental
-    # RGB-style edits from producing the wrong overlay colors.
-    TRANSPARENT_COLOR = 0x00FF00FF
+    # dark panel fill, subtle panel border, blue microphone circle, pale-blue
+    # circle outline, and white text/icon. Keeping that convention documented
+    # prevents accidental RGB-style edits from producing the wrong colors.
+    PANEL_FILL_COLOR = 0x00302A24
+    PANEL_BORDER_COLOR = 0x006B5F55
     BUBBLE_FILL_COLOR = 0x00FF840A
     BUBBLE_OUTLINE_COLOR = 0x00FFC57D
-    ICON_COLOR = 0x00FFFFFF
+    CONTENT_COLOR = 0x00FFFFFF
 
     WM_DESTROY = 0x0002
     WM_PAINT = 0x000F
     WM_TIMER = 0x0113
     WM_QUIT = 0x0012
     WS_POPUP = 0x80000000
-    WS_EX_LAYERED = 0x00080000
-    WS_EX_TRANSPARENT = 0x00000020
     WS_EX_TOOLWINDOW = 0x00000080
     WS_EX_TOPMOST = 0x00000008
     WS_EX_NOACTIVATE = 0x08000000
-    LWA_COLORKEY = 0x00000001
     SW_HIDE = 0
     SW_SHOWNOACTIVATE = 4
     SWP_NOACTIVATE = 0x0010
     SWP_SHOWWINDOW = 0x0040
     PS_SOLID = 0
     TRANSPARENT_BK_MODE = 1
+    SPI_GETWORKAREA = 0x0030
+    DT_LEFT = 0x0000
+    DT_VCENTER = 0x0004
+    DT_SINGLELINE = 0x0020
 
     def __init__(self):
         self._visible_event = threading.Event()
@@ -132,23 +121,6 @@ class ListeningIndicator:
 
         # ctypes signatures are declared once so Win32 failures appear as
         # predictable return values instead of argument-conversion surprises.
-        self._user32.GetForegroundWindow.argtypes = []
-        self._user32.GetForegroundWindow.restype = wintypes.HWND
-        self._user32.GetWindowThreadProcessId.argtypes = [
-            wintypes.HWND,
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        self._user32.GetWindowThreadProcessId.restype = wintypes.DWORD
-        self._user32.GetGUIThreadInfo.argtypes = [
-            wintypes.DWORD,
-            ctypes.POINTER(GUITHREADINFO),
-        ]
-        self._user32.GetGUIThreadInfo.restype = wintypes.BOOL
-        self._user32.ClientToScreen.argtypes = [
-            wintypes.HWND,
-            ctypes.POINTER(POINT),
-        ]
-        self._user32.ClientToScreen.restype = wintypes.BOOL
         self._user32.RegisterClassExW.argtypes = [ctypes.POINTER(WNDCLASSEXW)]
         self._user32.RegisterClassExW.restype = wintypes.ATOM
         self._user32.CreateWindowExW.argtypes = [
@@ -187,13 +159,6 @@ class ListeningIndicator:
             wintypes.UINT,
         ]
         self._user32.SetWindowPos.restype = wintypes.BOOL
-        self._user32.SetLayeredWindowAttributes.argtypes = [
-            wintypes.HWND,
-            wintypes.COLORREF,
-            ctypes.c_byte,
-            wintypes.DWORD,
-        ]
-        self._user32.SetLayeredWindowAttributes.restype = wintypes.BOOL
         self._user32.SetTimer.argtypes = [
             wintypes.HWND,
             UINT_PTR,
@@ -237,6 +202,21 @@ class ListeningIndicator:
             wintypes.HBRUSH,
         ]
         self._user32.FillRect.restype = ctypes.c_int
+        self._user32.SystemParametersInfoW.argtypes = [
+            wintypes.UINT,
+            wintypes.UINT,
+            ctypes.POINTER(RECT),
+            wintypes.UINT,
+        ]
+        self._user32.SystemParametersInfoW.restype = wintypes.BOOL
+        self._user32.DrawTextW.argtypes = [
+            wintypes.HDC,
+            wintypes.LPCWSTR,
+            ctypes.c_int,
+            ctypes.POINTER(RECT),
+            wintypes.UINT,
+        ]
+        self._user32.DrawTextW.restype = ctypes.c_int
         self._kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
         self._kernel32.GetModuleHandleW.restype = wintypes.HANDLE
         self._kernel32.GetCurrentThreadId.argtypes = []
@@ -299,6 +279,8 @@ class ListeningIndicator:
         self._gdi32.Arc.restype = wintypes.BOOL
         self._gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
         self._gdi32.SetBkMode.restype = ctypes.c_int
+        self._gdi32.SetTextColor.argtypes = [wintypes.HDC, wintypes.COLORREF]
+        self._gdi32.SetTextColor.restype = wintypes.COLORREF
 
         self._thread = threading.Thread(target=self._run_window, daemon=True)
         self._thread.start()
@@ -319,9 +301,9 @@ class ListeningIndicator:
         if self._thread_id is not None:
             self._user32.PostThreadMessageW(self._thread_id, self.WM_QUIT, 0, 0)
         if self._thread.is_alive():
-            # The overlay is a background visual cue. Shutdown waits briefly so
-            # normal exits clean up the Win32 window, but it does not block app
-            # exit forever if Windows message dispatch is already tearing down.
+            # The status window is a background visual cue. Shutdown waits
+            # briefly so normal exits clean up the Win32 window, but it does not
+            # block app exit forever if Windows message dispatch is tearing down.
             self._thread.join(timeout=self.SHUTDOWN_TIMEOUT_SECONDS)
 
     def _run_window(self) -> None:
@@ -338,13 +320,7 @@ class ListeningIndicator:
             if not atom:
                 raise ctypes.WinError()
 
-            ex_style = (
-                self.WS_EX_TOPMOST
-                | self.WS_EX_LAYERED
-                | self.WS_EX_TRANSPARENT
-                | self.WS_EX_TOOLWINDOW
-                | self.WS_EX_NOACTIVATE
-            )
+            ex_style = self.WS_EX_TOPMOST | self.WS_EX_TOOLWINDOW | self.WS_EX_NOACTIVATE
             self._hwnd = self._user32.CreateWindowExW(
                 ex_style,
                 self._class_name,
@@ -352,8 +328,8 @@ class ListeningIndicator:
                 self.WS_POPUP,
                 0,
                 0,
-                self.WINDOW_SIZE,
-                self.WINDOW_SIZE,
+                self.WINDOW_WIDTH,
+                self.WINDOW_HEIGHT,
                 None,
                 None,
                 instance,
@@ -362,13 +338,6 @@ class ListeningIndicator:
             if not self._hwnd:
                 raise ctypes.WinError()
 
-            if not self._user32.SetLayeredWindowAttributes(
-                self._hwnd,
-                self.TRANSPARENT_COLOR,
-                255,
-                self.LWA_COLORKEY,
-            ):
-                raise ctypes.WinError()
             if not self._user32.SetTimer(
                 self._hwnd,
                 self.TIMER_ID,
@@ -442,31 +411,28 @@ class ListeningIndicator:
             self._user32.ShowWindow(self._hwnd, self.SW_HIDE)
             return
 
-        caret_position = self._get_caret_screen_position()
-        if caret_position is None:
-            # Some apps draw custom carets that are not exposed via the system
-            # caret API. Hiding is safer than drawing the bubble in the wrong
-            # place.
-            self._user32.ShowWindow(self._hwnd, self.SW_HIDE)
-            return
+        work_area = RECT()
+        if not self._user32.SystemParametersInfoW(
+            self.SPI_GETWORKAREA,
+            0,
+            ctypes.byref(work_area),
+            0,
+        ):
+            raise ctypes.WinError()
 
-        x, y = caret_position
+        work_width = work_area.right - work_area.left
+        x = work_area.left + ((work_width - self.WINDOW_WIDTH) // 2)
+        y = work_area.bottom - self.WINDOW_HEIGHT - self.WORK_AREA_BOTTOM_GAP_PX
         if not self._user32.SetWindowPos(
             self._hwnd,
             wintypes.HWND(-1),
             x,
             y,
-            self.WINDOW_SIZE,
-            self.WINDOW_SIZE,
+            self.WINDOW_WIDTH,
+            self.WINDOW_HEIGHT,
             self.SWP_NOACTIVATE | self.SWP_SHOWWINDOW,
         ):
-            print(
-                f"\nListening indicator warning: {ctypes.WinError()}",
-                file=sys.stderr,
-                flush=True,
-            )
-            self._user32.ShowWindow(self._hwnd, self.SW_HIDE)
-            return
+            raise ctypes.WinError()
         self._user32.ShowWindow(self._hwnd, self.SW_SHOWNOACTIVATE)
 
     def _paint_window(self, hwnd: int) -> None:
@@ -480,49 +446,77 @@ class ListeningIndicator:
             self._user32.EndPaint(hwnd, ctypes.byref(paint))
 
     def _draw_indicator_icon(self, hdc: int) -> None:
-        background = self._gdi32.CreateSolidBrush(self.TRANSPARENT_COLOR)
+        panel_brush = self._gdi32.CreateSolidBrush(self.PANEL_FILL_COLOR)
+        panel_pen = self._gdi32.CreatePen(
+            self.PS_SOLID,
+            1,
+            self.PANEL_BORDER_COLOR,
+        )
         bubble_brush = self._gdi32.CreateSolidBrush(self.BUBBLE_FILL_COLOR)
         outline_pen = self._gdi32.CreatePen(
             self.PS_SOLID,
             2,
             self.BUBBLE_OUTLINE_COLOR,
         )
-        icon_pen = self._gdi32.CreatePen(self.PS_SOLID, 3, self.ICON_COLOR)
-        icon_brush = self._gdi32.CreateSolidBrush(self.ICON_COLOR)
+        icon_pen = self._gdi32.CreatePen(self.PS_SOLID, 3, self.CONTENT_COLOR)
+        icon_brush = self._gdi32.CreateSolidBrush(self.CONTENT_COLOR)
         try:
-            full_rect = RECT(0, 0, self.WINDOW_SIZE, self.WINDOW_SIZE)
-            self._user32.FillRect(hdc, ctypes.byref(full_rect), background)
+            full_rect = RECT(0, 0, self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
+            self._user32.FillRect(hdc, ctypes.byref(full_rect), panel_brush)
             self._gdi32.SetBkMode(hdc, self.TRANSPARENT_BK_MODE)
 
-            old_pen = self._gdi32.SelectObject(hdc, outline_pen)
-            old_brush = self._gdi32.SelectObject(hdc, bubble_brush)
-            self._gdi32.Ellipse(hdc, 3, 3, self.WINDOW_SIZE - 3, self.WINDOW_SIZE - 3)
+            old_pen = self._gdi32.SelectObject(hdc, panel_pen)
+            old_brush = self._gdi32.SelectObject(hdc, panel_brush)
+            self._gdi32.RoundRect(
+                hdc,
+                0,
+                0,
+                self.WINDOW_WIDTH,
+                self.WINDOW_HEIGHT,
+                10,
+                10,
+            )
 
+            self._gdi32.SelectObject(hdc, outline_pen)
+            self._gdi32.SelectObject(hdc, bubble_brush)
+            self._gdi32.Ellipse(hdc, 14, 10, 50, 46)
+
+            center = 32
             self._gdi32.SelectObject(hdc, icon_pen)
             self._gdi32.SelectObject(hdc, icon_brush)
-            center = self.WINDOW_SIZE // 2
-            self._gdi32.RoundRect(hdc, center - 5, 12, center + 5, 28, 8, 8)
+            self._gdi32.RoundRect(hdc, center - 5, 18, center + 5, 31, 8, 8)
             self._gdi32.Arc(
                 hdc,
                 center - 11,
-                16,
+                21,
                 center + 11,
-                35,
+                39,
                 center - 9,
-                24,
+                29,
                 center + 9,
-                24,
+                29,
             )
-            self._gdi32.MoveToEx(hdc, center, 34, None)
-            self._gdi32.LineTo(hdc, center, 40)
-            self._gdi32.MoveToEx(hdc, center - 7, 40, None)
-            self._gdi32.LineTo(hdc, center + 7, 40)
+            self._gdi32.MoveToEx(hdc, center, 38, None)
+            self._gdi32.LineTo(hdc, center, 43)
+            self._gdi32.MoveToEx(hdc, center - 7, 43, None)
+            self._gdi32.LineTo(hdc, center + 7, 43)
+
+            text_rect = RECT(64, 0, self.WINDOW_WIDTH - 14, self.WINDOW_HEIGHT)
+            self._gdi32.SetTextColor(hdc, self.CONTENT_COLOR)
+            self._user32.DrawTextW(
+                hdc,
+                self.STATUS_TEXT,
+                -1,
+                ctypes.byref(text_rect),
+                self.DT_LEFT | self.DT_SINGLELINE | self.DT_VCENTER,
+            )
 
             self._gdi32.SelectObject(hdc, old_pen)
             self._gdi32.SelectObject(hdc, old_brush)
         finally:
             for gdi_object in (
-                background,
+                panel_brush,
+                panel_pen,
                 bubble_brush,
                 outline_pen,
                 icon_pen,
@@ -530,37 +524,3 @@ class ListeningIndicator:
             ):
                 if gdi_object:
                     self._gdi32.DeleteObject(gdi_object)
-
-    def _get_caret_screen_position(self) -> tuple[int, int] | None:
-        foreground_hwnd = self._user32.GetForegroundWindow()
-        if not foreground_hwnd:
-            return None
-
-        thread_id = self._user32.GetWindowThreadProcessId(foreground_hwnd, None)
-        if not thread_id:
-            return None
-
-        info = GUITHREADINFO()
-        info.cbSize = ctypes.sizeof(GUITHREADINFO)
-        if not self._user32.GetGUIThreadInfo(thread_id, ctypes.byref(info)):
-            return None
-        if not info.hwndCaret:
-            return None
-
-        caret_rect = info.rcCaret
-        if (
-            caret_rect.left == 0
-            and caret_rect.top == 0
-            and caret_rect.right == 0
-            and caret_rect.bottom == 0
-        ):
-            return None
-
-        point = POINT(caret_rect.left, caret_rect.bottom)
-        if not self._user32.ClientToScreen(info.hwndCaret, ctypes.byref(point)):
-            return None
-
-        return (
-            point.x - (self.WINDOW_SIZE // 2),
-            point.y + self.CARET_GAP_PX,
-        )
