@@ -12,6 +12,7 @@ from app_config import (
     get_asset_dir,
 )
 from dictation_session import listen
+from error_dialog import show_error_message
 
 if TYPE_CHECKING:
     import pygame
@@ -143,6 +144,10 @@ class DictationController:
             )
         except Exception as exc:
             logger.exception("Dictation session failed.")
+            show_error_message(
+                "Win Voice Input Dictation Error",
+                f"Dictation session failed:\n\n{exc}",
+            )
             print(f"\nDictation session error: {exc}", file=sys.stderr, flush=True)
         finally:
             # Returning to Idle here covers manual pause, tray pause, and

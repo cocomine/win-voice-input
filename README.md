@@ -9,7 +9,7 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Prints interim and final transcripts in the terminal.
 - Pastes final transcripts into the active Windows app.
 - Shows a system tray icon with Idle / Listening / Stopping status.
-- Lets you open the logs folder and config folder from the tray menu.
+- Lets you open Settings, logs folder, and config folder from the tray menu.
 - Shows a small listening status window while listening.
 - Uses `assets\mic.svg` in green while listening, and automatically recolors `assets\mic-mute.svg` for Windows light or dark system UI while not listening.
 - Plays `assets\start.mp3` when listening begins and `assets\end.mp3` when listening stops.
@@ -17,6 +17,7 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Stops the current listening session after 5 seconds without recognized text.
 - Voice commands are disabled by default, so recognized text is pasted as-is.
 - Reads optional settings from `config.json`; without a device setting, it uses the Windows default input device.
+- Shows fatal startup/runtime errors in a Windows message box so windowed builds do not fail silently.
 - Writes diagnostic logs to `%LOCALAPPDATA%\WinVoiceInput\logs\win-voice-input.log`.
 - Can be packaged as a Windows `.exe` with the tray SVG assets included.
 - Defaults to Hong Kong Cantonese: `yue-Hant-HK`.
@@ -118,9 +119,11 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 
 After it starts, a tray icon appears in the Windows notification area. Click into Notepad, Word, a browser text box, or any other target app. Press `Ctrl+Alt+V` or use the tray menu to start listening. Press `Ctrl+Alt+V` again, or choose Pause from the tray menu, to stop the current session.
 
-The tray menu also includes Open logs folder and Open config folder. Logs are
-written to `%LOCALAPPDATA%\WinVoiceInput\logs\win-voice-input.log`, which is
-especially useful after building with `-Windowed`.
+The tray menu also includes Settings, Open logs folder, and Open config folder.
+Settings opens a PySide6 editor for `config.json`; saved changes take effect
+after restarting the app. Logs are written to
+`%LOCALAPPDATA%\WinVoiceInput\logs\win-voice-input.log`, which is especially
+useful after building with `-Windowed`.
 
 On startup, the console prints the input device it will use. If no device is configured, it prints the current Windows default input device.
 
@@ -195,3 +198,4 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 - Idle auto-stop is enabled by default with `-IdleTimeoutSeconds 5`; use `0` to disable it.
 - The packaged exe reads `config.json` from the same folder as `WinVoiceInput.exe`.
 - Logs rotate automatically so daily use does not grow one unlimited log file.
+- Fatal startup/runtime errors still go to the log, but they also appear in a Windows message box.

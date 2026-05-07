@@ -23,6 +23,7 @@ from app_config import (
     DictationSettings,
     FeedbackSettings,
 )
+from error_dialog import show_error_message
 from global_hotkey import HOTKEY_DISPLAY_NAME
 from hotkey_app import HotkeyDictationApp
 
@@ -76,6 +77,11 @@ def main() -> int:
         "--list-devices",
         action="store_true",
         help="Show audio devices and exit.",
+    )
+    parser.add_argument(
+        "--settings",
+        action="store_true",
+        help="Open the config editor and exit.",
     )
     parser.add_argument(
         "--paste-final",
@@ -180,10 +186,12 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.tray is True and args.hotkey is True:
-        parser.error(
+        message = (
             "--tray and --hotkey cannot be used together because tray mode "
             f"already includes {HOTKEY_DISPLAY_NAME}."
         )
+        show_error_message("Win Voice Input Arguments Error", message)
+        parser.error(message)
 
     if args.list_devices:
         # Listing devices must not create a Google client or touch Windows
@@ -194,6 +202,10 @@ def main() -> int:
 
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
+        show_error_message(
+            "Win Voice Input Error",
+            "LOCALAPPDATA is not set, so the app cannot create logs.",
+        )
         print(
             "\nError: LOCALAPPDATA is not set, so the app cannot create logs.",
             file=sys.stderr,
@@ -204,6 +216,10 @@ def main() -> int:
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
+        show_error_message(
+            "Win Voice Input Error",
+            f"Failed to create log folder:\n{log_dir}\n\n{exc}",
+        )
         print(f"\nError: Failed to create log folder: {log_dir}", file=sys.stderr)
         print(str(exc), file=sys.stderr)
         return 1
@@ -245,6 +261,23 @@ def main() -> int:
         config_was_explicit = True
     logging.info("Using config path: %s", config_path)
 
+    if args.settings:
+        try:
+            from config_editor import run_config_editor
+
+            return run_config_editor(config_path)
+        except Exception as exc:
+            message = (
+                "Unable to open the settings editor.\n\n"
+                f"{exc}\n\n"
+                "If this is a source run, install runtime dependencies from "
+                "requirements.txt."
+            )
+            logging.exception("Failed to open config editor.")
+            show_error_message("Win Voice Input Settings Error", message)
+            print(f"\nError: {message}", file=sys.stderr)
+            return 1
+
     settings = {
         "credentials": "",
         "device": None,
@@ -268,12 +301,20 @@ def main() -> int:
             config_data = json.loads(config_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             logging.exception("Failed to read config file: %s", config_path)
+            show_error_message(
+                "Win Voice Input Config Error",
+                f"Failed to read config file:\n{config_path}\n\n{exc}",
+            )
             print(f"\nError: Failed to read config file: {config_path}", file=sys.stderr)
             print(str(exc), file=sys.stderr)
             return 1
 
         if not isinstance(config_data, dict):
             logging.error("Config file is not a JSON object: %s", config_path)
+            show_error_message(
+                "Win Voice Input Config Error",
+                f"Config file must contain a JSON object:\n{config_path}",
+            )
             print(f"\nError: Config file must contain a JSON object: {config_path}", file=sys.stderr)
             return 1
 
@@ -299,6 +340,10 @@ def main() -> int:
                 settings[setting_name] = config_data[config_name]
     elif config_was_explicit:
         logging.error("Config file does not exist: %s", config_path)
+        show_error_message(
+            "Win Voice Input Config Error",
+            f"Config file does not exist:\n{config_path}",
+        )
         print(f"\nError: Config file does not exist: {config_path}", file=sys.stderr)
         return 1
 
@@ -313,6 +358,11 @@ def main() -> int:
 
     if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
         logging.error("Google credentials are not configured.")
+        show_error_message(
+            "Win Voice Input Setup Error",
+            "Please set Google credentials in config.json or "
+            "GOOGLE_APPLICATION_CREDENTIALS.",
+        )
         print(
             "\nError: Please set Google credentials in config.json or "
             "GOOGLE_APPLICATION_CREDENTIALS.",
@@ -356,6 +406,12 @@ def main() -> int:
         logging.error(
             "Invalid listeningIndicatorPosition: %r",
             settings["listening_indicator_position"],
+        )
+        show_error_message(
+            "Win Voice Input Config Error",
+            "Invalid listeningIndicatorPosition in config.json:\n"
+            f"{settings['listening_indicator_position']!r}\n\n"
+            f"Expected one of: {allowed_positions}.",
         )
         print(
             "\nError: Invalid listeningIndicatorPosition in config.json: "
@@ -468,6 +524,7 @@ def main() -> int:
         return 0
     except Exception as exc:
         logging.exception("Unhandled application error.")
+        show_error_message("Win Voice Input Error", str(exc))
         print(f"\nError: {exc}", file=sys.stderr)
         return 1
 

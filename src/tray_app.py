@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 import sys
 import threading
 import winreg
@@ -18,6 +19,7 @@ from app_config import (
     get_asset_dir,
 )
 from dictation_controller import DictationController
+from error_dialog import show_error_message
 from global_hotkey import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
 from listening_indicator import ListeningIndicator
 
@@ -133,6 +135,7 @@ class TrayDictationApp:
                 self._on_pause,
                 enabled=lambda item: self.controller.status == "Listening",
             ),
+            pystray.MenuItem("Settings...", self._on_open_settings),
             pystray.MenuItem("Open logs folder", self._on_open_logs_folder),
             pystray.MenuItem("Open config folder", self._on_open_config_folder),
             pystray.MenuItem("Exit", self._on_exit),
@@ -170,6 +173,10 @@ class TrayDictationApp:
             self.hotkey_listener.run(self.controller.toggle)
         except Exception as exc:
             logger.exception("Hotkey listener failed.")
+            show_error_message(
+                "Win Voice Input Hotkey Error",
+                f"Hotkey listener failed:\n\n{exc}",
+            )
             print(f"\nHotkey listener error: {exc}", file=sys.stderr, flush=True)
             if self.icon is not None:
                 self.icon.stop()
@@ -179,6 +186,44 @@ class TrayDictationApp:
 
     def _on_pause(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         self.controller.stop()
+
+    def _on_open_settings(
+        self,
+        icon: pystray.Icon,
+        item: pystray.MenuItem,
+    ) -> None:
+        # The settings editor runs in a separate process because Qt owns its own
+        # event loop. Keeping it out of the pystray process avoids UI-loop
+        # contention while dictation and tray hotkeys keep running.
+        if getattr(sys, "frozen", False):
+            command = [
+                sys.executable,
+                "--settings",
+                "--config",
+                str(self.config_path),
+            ]
+        else:
+            command = [
+                sys.executable,
+                str(Path(__file__).resolve().parent / "voice_input.py"),
+                "--settings",
+                "--config",
+                str(self.config_path),
+            ]
+        try:
+            subprocess.Popen(command)
+            logger.info("Opened settings editor for config: %s", self.config_path)
+        except OSError as exc:
+            logger.exception("Failed to open settings editor.")
+            show_error_message(
+                "Win Voice Input Settings Error",
+                f"Unable to open settings editor:\n\n{exc}",
+            )
+            print(
+                f"\nFailed to open settings editor: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     def _on_open_logs_folder(
         self,
@@ -226,6 +271,7 @@ class TrayDictationApp:
         if not folder_path.is_dir():
             message = f"{folder_label.title()} folder does not exist: {folder_path}"
             logger.error(message)
+            show_error_message("Win Voice Input Error", message)
             print(f"\n{message}", file=sys.stderr, flush=True)
             return
         try:
@@ -236,6 +282,10 @@ class TrayDictationApp:
                 "Failed to open %s folder: %s",
                 folder_label,
                 folder_path,
+            )
+            show_error_message(
+                "Win Voice Input Error",
+                f"Failed to open {folder_label} folder:\n\n{exc}",
             )
             print(
                 f"\nFailed to open {folder_label} folder: {exc}",

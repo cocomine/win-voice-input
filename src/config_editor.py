@@ -1,0 +1,309 @@
+import json
+import logging
+import sys
+from pathlib import Path
+
+import sounddevice as sd
+
+from app_config import (
+    ALLOWED_LISTENING_INDICATOR_POSITIONS,
+    DEFAULT_FINAL_DEDUPE_SECONDS,
+    DEFAULT_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_LANGUAGE,
+    DEFAULT_LISTENING_INDICATOR_POSITION,
+    DEFAULT_PLAY_STATUS_SOUNDS,
+    DEFAULT_RATE,
+    DEFAULT_SHOW_LISTENING_INDICATOR,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class ConfigEditorWindow:
+    # The settings editor is intentionally isolated from tray and dictation
+    # code. It edits config.json only; current listening sessions keep their
+    # already-loaded settings until the app is restarted.
+    def __init__(self, config_path: Path):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import (
+            QCheckBox,
+            QComboBox,
+            QDoubleSpinBox,
+            QFileDialog,
+            QFormLayout,
+            QHBoxLayout,
+            QLabel,
+            QLineEdit,
+            QMainWindow,
+            QMessageBox,
+            QPushButton,
+            QSpinBox,
+            QVBoxLayout,
+            QWidget,
+        )
+
+        self._qt = {
+            "Qt": Qt,
+            "QCheckBox": QCheckBox,
+            "QComboBox": QComboBox,
+            "QDoubleSpinBox": QDoubleSpinBox,
+            "QFileDialog": QFileDialog,
+            "QFormLayout": QFormLayout,
+            "QHBoxLayout": QHBoxLayout,
+            "QLabel": QLabel,
+            "QLineEdit": QLineEdit,
+            "QMainWindow": QMainWindow,
+            "QMessageBox": QMessageBox,
+            "QPushButton": QPushButton,
+            "QSpinBox": QSpinBox,
+            "QVBoxLayout": QVBoxLayout,
+            "QWidget": QWidget,
+        }
+        self.config_path = config_path
+        self.config_data = self._read_config()
+        self.window = QMainWindow()
+        self.window.setWindowTitle("Win Voice Input Settings")
+        self.window.resize(560, 520)
+
+        root = QWidget()
+        root_layout = QVBoxLayout(root)
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        root_layout.addLayout(form)
+
+        self.credentials_edit = QLineEdit()
+        browse_button = QPushButton("Browse...")
+        browse_button.clicked.connect(self._choose_credentials_file)
+        credentials_row = QHBoxLayout()
+        credentials_row.addWidget(self.credentials_edit)
+        credentials_row.addWidget(browse_button)
+        form.addRow("Google credentials JSON", credentials_row)
+
+        self.device_combo = QComboBox()
+        self.device_combo.addItem("Windows default input device", None)
+        self._populate_devices()
+        form.addRow("Input device", self.device_combo)
+
+        self.language_edit = QLineEdit()
+        form.addRow("Language", self.language_edit)
+
+        self.rate_spin = QSpinBox()
+        self.rate_spin.setRange(8000, 192000)
+        self.rate_spin.setSingleStep(1000)
+        form.addRow("Sample rate", self.rate_spin)
+
+        self.paste_final_check = QCheckBox("Paste final transcripts")
+        form.addRow("", self.paste_final_check)
+
+        self.append_space_check = QCheckBox("Append space after final text")
+        form.addRow("", self.append_space_check)
+
+        self.command_words_check = QCheckBox("Enable command words")
+        form.addRow("", self.command_words_check)
+
+        self.final_dedupe_spin = QDoubleSpinBox()
+        self.final_dedupe_spin.setRange(0.0, 30.0)
+        self.final_dedupe_spin.setDecimals(2)
+        self.final_dedupe_spin.setSingleStep(0.1)
+        form.addRow("Duplicate protection seconds", self.final_dedupe_spin)
+
+        self.idle_timeout_spin = QDoubleSpinBox()
+        self.idle_timeout_spin.setRange(0.0, 120.0)
+        self.idle_timeout_spin.setDecimals(1)
+        self.idle_timeout_spin.setSingleStep(1.0)
+        form.addRow("Idle auto-stop seconds", self.idle_timeout_spin)
+
+        self.play_sounds_check = QCheckBox("Play start/end sounds")
+        form.addRow("", self.play_sounds_check)
+
+        self.show_indicator_check = QCheckBox("Show listening indicator")
+        form.addRow("", self.show_indicator_check)
+
+        self.indicator_position_combo = QComboBox()
+        for position in ALLOWED_LISTENING_INDICATOR_POSITIONS:
+            self.indicator_position_combo.addItem(position, position)
+        form.addRow("Indicator position", self.indicator_position_combo)
+
+        note = QLabel("Changes are saved to config.json and take effect after restarting the app.")
+        note.setWordWrap(True)
+        root_layout.addWidget(note)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        save_button = QPushButton("Save")
+        save_button.clicked.connect(self._save_config)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.window.close)
+        buttons.addWidget(save_button)
+        buttons.addWidget(close_button)
+        root_layout.addLayout(buttons)
+
+        self.window.setCentralWidget(root)
+        self._load_values_into_widgets()
+
+    def show(self) -> None:
+        self.window.show()
+        self.window.raise_()
+        self.window.activateWindow()
+
+    def _read_config(self) -> dict:
+        QMessageBox = self._qt["QMessageBox"]
+        if not self.config_path.exists():
+            return {}
+        try:
+            config_data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            QMessageBox.critical(
+                None,
+                "Unable to read config",
+                f"Unable to read config file:\n{self.config_path}\n\n{exc}",
+            )
+            logger.exception("Config editor failed to read config: %s", self.config_path)
+            return {}
+        if not isinstance(config_data, dict):
+            QMessageBox.critical(
+                None,
+                "Invalid config",
+                f"Config file must contain a JSON object:\n{self.config_path}",
+            )
+            logger.error("Config editor found non-object config: %s", self.config_path)
+            return {}
+        return config_data
+
+    def _populate_devices(self) -> None:
+        QMessageBox = self._qt["QMessageBox"]
+        try:
+            devices = sd.query_devices()
+        except Exception as exc:
+            QMessageBox.critical(
+                self.window,
+                "Unable to list microphones",
+                f"Unable to list input devices.\n\n{exc}",
+            )
+            logger.exception("Config editor failed to list audio devices.")
+            return
+
+        for index, device in enumerate(devices):
+            if int(device.get("max_input_channels", 0)) <= 0:
+                continue
+            self.device_combo.addItem(f"{device['name']} (index {index})", index)
+
+    def _load_values_into_widgets(self) -> None:
+        self.credentials_edit.setText(str(self.config_data.get("credentials", "")))
+
+        configured_device = self.config_data.get("device")
+        device_was_found = False
+        for index in range(self.device_combo.count()):
+            if self.device_combo.itemData(index) == configured_device:
+                self.device_combo.setCurrentIndex(index)
+                device_was_found = True
+                break
+        if configured_device is not None and not device_was_found:
+            # A configured microphone can be unplugged while the setting is
+            # still valid for the user's normal setup. Keep that explicit index
+            # visible so opening and saving settings does not silently switch
+            # back to the Windows default input device.
+            self.device_combo.addItem(
+                f"Configured device index {configured_device} (not available)",
+                configured_device,
+            )
+            self.device_combo.setCurrentIndex(self.device_combo.count() - 1)
+
+        self.language_edit.setText(str(self.config_data.get("language", DEFAULT_LANGUAGE)))
+        self.rate_spin.setValue(int(self.config_data.get("rate", DEFAULT_RATE)))
+        self.paste_final_check.setChecked(bool(self.config_data.get("pasteFinal", True)))
+        self.append_space_check.setChecked(bool(self.config_data.get("appendSpace", False)))
+        self.command_words_check.setChecked(bool(self.config_data.get("commandWords", False)))
+        self.final_dedupe_spin.setValue(
+            float(self.config_data.get("finalDedupeSeconds", DEFAULT_FINAL_DEDUPE_SECONDS))
+        )
+        self.idle_timeout_spin.setValue(
+            float(self.config_data.get("idleTimeoutSeconds", DEFAULT_IDLE_TIMEOUT_SECONDS))
+        )
+        self.play_sounds_check.setChecked(
+            bool(self.config_data.get("playStatusSounds", DEFAULT_PLAY_STATUS_SOUNDS))
+        )
+        self.show_indicator_check.setChecked(
+            bool(
+                self.config_data.get(
+                    "showListeningIndicator",
+                    DEFAULT_SHOW_LISTENING_INDICATOR,
+                )
+            )
+        )
+        configured_position = str(
+            self.config_data.get(
+                "listeningIndicatorPosition",
+                DEFAULT_LISTENING_INDICATOR_POSITION,
+            )
+        ).strip().lower()
+        index = self.indicator_position_combo.findData(configured_position)
+        if index >= 0:
+            self.indicator_position_combo.setCurrentIndex(index)
+
+    def _choose_credentials_file(self) -> None:
+        QFileDialog = self._qt["QFileDialog"]
+        selected_path, _ = QFileDialog.getOpenFileName(
+            self.window,
+            "Select Google credentials JSON",
+            str(self.config_path.parent),
+            "JSON files (*.json);;All files (*.*)",
+        )
+        if selected_path:
+            self.credentials_edit.setText(selected_path)
+
+    def _save_config(self) -> None:
+        QMessageBox = self._qt["QMessageBox"]
+        self.config_data["credentials"] = self.credentials_edit.text().strip()
+        self.config_data["device"] = self.device_combo.currentData()
+        self.config_data["language"] = self.language_edit.text().strip() or DEFAULT_LANGUAGE
+        self.config_data["rate"] = int(self.rate_spin.value())
+        self.config_data["pasteFinal"] = self.paste_final_check.isChecked()
+        self.config_data["tray"] = bool(self.config_data.get("tray", True))
+        self.config_data["hotkey"] = bool(self.config_data.get("hotkey", True))
+        self.config_data["commandWords"] = self.command_words_check.isChecked()
+        self.config_data["appendSpace"] = self.append_space_check.isChecked()
+        self.config_data["finalDedupeSeconds"] = float(self.final_dedupe_spin.value())
+        self.config_data["idleTimeoutSeconds"] = float(self.idle_timeout_spin.value())
+        self.config_data["playStatusSounds"] = self.play_sounds_check.isChecked()
+        self.config_data["showListeningIndicator"] = self.show_indicator_check.isChecked()
+        self.config_data["listeningIndicatorPosition"] = (
+            self.indicator_position_combo.currentData()
+        )
+
+        try:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            self.config_path.write_text(
+                json.dumps(self.config_data, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            QMessageBox.critical(
+                self.window,
+                "Unable to save config",
+                f"Unable to save config file:\n{self.config_path}\n\n{exc}",
+            )
+            logger.exception("Config editor failed to save config: %s", self.config_path)
+            return
+
+        logger.info("Config editor saved config: %s", self.config_path)
+        QMessageBox.information(
+            self.window,
+            "Settings saved",
+            "Settings saved. Restart Win Voice Input to apply changes.",
+        )
+
+
+def run_config_editor(config_path: Path) -> int:
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    owns_app = app is None
+    if app is None:
+        app = QApplication(sys.argv[:1])
+
+    editor = ConfigEditorWindow(config_path)
+    editor.show()
+    if owns_app:
+        return app.exec()
+    return 0
