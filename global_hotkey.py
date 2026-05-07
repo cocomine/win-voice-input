@@ -2,6 +2,8 @@ import ctypes
 from collections.abc import Callable
 from ctypes import wintypes
 
+from win32_message_types import MSG
+
 
 HOTKEY_ID_TOGGLE_LISTENING = 1
 MOD_ALT = 0x0001
@@ -13,26 +15,6 @@ WM_QUIT = 0x0012
 HotkeyCallback = Callable[[], None]
 
 
-class POINT(ctypes.Structure):
-    # MSG embeds POINT, so it must be represented even though this app does not
-    # inspect mouse coordinates from the message queue.
-    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
-
-
-class MSG(ctypes.Structure):
-    # RegisterHotKey posts WM_HOTKEY messages into a standard Win32 message
-    # queue. Keeping the MSG layout explicit lets Python receive that queue
-    # without adding a GUI framework.
-    _fields_ = [
-        ("hwnd", wintypes.HWND),
-        ("message", wintypes.UINT),
-        ("wParam", wintypes.WPARAM),
-        ("lParam", wintypes.LPARAM),
-        ("time", wintypes.DWORD),
-        ("pt", POINT),
-    ]
-
-
 class GlobalHotkeyListener:
     # This listener owns only Win32 hotkey registration and message dispatch.
     # It does not know about dictation state, tray UI, or Google STT; callers
@@ -42,9 +24,10 @@ class GlobalHotkeyListener:
         self._kernel32 = ctypes.windll.kernel32
         self._thread_id: int | None = None
 
-        # ctypes signatures are declared here because this module is the only
-        # owner of RegisterHotKey/GetMessageW/PostThreadMessageW. Keeping them
-        # local makes hotkey behavior reviewable without scanning UI modules.
+        # ctypes signatures are declared here because this module owns hotkey
+        # registration and dispatch. MSG comes from a shared module because
+        # GetMessageW argtypes are shared with the listening indicator through
+        # ctypes.windll.user32.
         self._user32.RegisterHotKey.argtypes = [
             wintypes.HWND,
             ctypes.c_int,
@@ -73,21 +56,23 @@ class GlobalHotkeyListener:
 
     def run(self, on_toggle: HotkeyCallback) -> None:
         self._thread_id = self._kernel32.GetCurrentThreadId()
+        hotkey_registered = False
 
-        # RegisterHotKey asks Windows to deliver Ctrl+Alt+Space even when another
-        # app has focus. The listener raises immediately if Windows rejects the
-        # hotkey, because silently choosing another shortcut would change user
-        # control behavior.
-        if not self._user32.RegisterHotKey(
-            None,
-            HOTKEY_ID_TOGGLE_LISTENING,
-            MOD_CONTROL | MOD_ALT,
-            VK_SPACE,
-        ):
-            raise ctypes.WinError()
-
-        msg = MSG()
         try:
+            # RegisterHotKey asks Windows to deliver Ctrl+Alt+Space even when
+            # another app has focus. The listener raises immediately if Windows
+            # rejects the hotkey, because silently choosing another shortcut
+            # would change user control behavior.
+            if not self._user32.RegisterHotKey(
+                None,
+                HOTKEY_ID_TOGGLE_LISTENING,
+                MOD_CONTROL | MOD_ALT,
+                VK_SPACE,
+            ):
+                raise ctypes.WinError()
+            hotkey_registered = True
+
+            msg = MSG()
             while True:
                 # GetMessageW blocks without CPU polling until Windows delivers
                 # a hotkey message or stop() posts WM_QUIT to this thread.
@@ -104,7 +89,8 @@ class GlobalHotkeyListener:
                 ):
                     on_toggle()
         finally:
-            self._user32.UnregisterHotKey(None, HOTKEY_ID_TOGGLE_LISTENING)
+            if hotkey_registered:
+                self._user32.UnregisterHotKey(None, HOTKEY_ID_TOGGLE_LISTENING)
             self._thread_id = None
 
     def stop(self) -> None:

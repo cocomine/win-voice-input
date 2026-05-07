@@ -1,16 +1,13 @@
 import ctypes
 import sys
 import threading
+import traceback
 from ctypes import wintypes
+
+from win32_message_types import MSG, POINT
 
 LRESULT = wintypes.LPARAM
 UINT_PTR = wintypes.WPARAM
-
-
-class POINT(ctypes.Structure):
-    # ClientToScreen writes into POINT, so the Win32 layout must match the C
-    # structure exactly when converting caret coordinates into screen pixels.
-    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
 
 
 class RECT(ctypes.Structure):
@@ -38,19 +35,6 @@ class GUITHREADINFO(ctypes.Structure):
         ("hwndMoveSize", wintypes.HWND),
         ("hwndCaret", wintypes.HWND),
         ("rcCaret", RECT),
-    ]
-
-
-class MSG(ctypes.Structure):
-    # The indicator owns a tiny Win32 message loop. MSG is required so the
-    # background thread can receive timer and quit messages without a GUI toolkit.
-    _fields_ = [
-        ("hwnd", wintypes.HWND),
-        ("message", wintypes.UINT),
-        ("wParam", wintypes.WPARAM),
-        ("lParam", wintypes.LPARAM),
-        ("time", wintypes.DWORD),
-        ("pt", POINT),
     ]
 
 
@@ -103,8 +87,14 @@ class ListeningIndicator:
     CARET_GAP_PX = 8
     TIMER_ID = 1
     POLL_INTERVAL_MS = 80
+    STARTUP_TIMEOUT_SECONDS = 5
+    SHUTDOWN_TIMEOUT_SECONDS = 2
     CLASS_NAME = "WinVoiceInputListeningIndicator"
 
+    # Win32 COLORREF values are 0x00BBGGRR, not RGB. The constants below are:
+    # magenta transparency key, blue bubble fill, pale-blue outline, and white
+    # microphone glyph. Keeping that convention documented prevents accidental
+    # RGB-style edits from producing the wrong overlay colors.
     TRANSPARENT_COLOR = 0x00FF00FF
     BUBBLE_FILL_COLOR = 0x00FF840A
     BUBBLE_OUTLINE_COLOR = 0x00FFC57D
@@ -312,6 +302,10 @@ class ListeningIndicator:
 
         self._thread = threading.Thread(target=self._run_window, daemon=True)
         self._thread.start()
+        if not self._ready_event.wait(self.STARTUP_TIMEOUT_SECONDS):
+            raise RuntimeError(
+                "Timed out while creating the listening indicator window."
+            )
 
     def show(self) -> None:
         self._visible_event.set()
@@ -325,7 +319,10 @@ class ListeningIndicator:
         if self._thread_id is not None:
             self._user32.PostThreadMessageW(self._thread_id, self.WM_QUIT, 0, 0)
         if self._thread.is_alive():
-            self._thread.join(timeout=2)
+            # The overlay is a background visual cue. Shutdown waits briefly so
+            # normal exits clean up the Win32 window, but it does not block app
+            # exit forever if Windows message dispatch is already tearing down.
+            self._thread.join(timeout=self.SHUTDOWN_TIMEOUT_SECONDS)
 
     def _run_window(self) -> None:
         self._thread_id = self._kernel32.GetCurrentThreadId()
@@ -396,11 +393,7 @@ class ListeningIndicator:
                 self._user32.TranslateMessage(ctypes.byref(msg))
                 self._user32.DispatchMessageW(ctypes.byref(msg))
         except Exception as exc:
-            print(
-                f"\nListening indicator warning: {exc}",
-                file=sys.stderr,
-                flush=True,
-            )
+            self._print_exception_warning(exc)
         finally:
             if self._hwnd is not None:
                 self._user32.DestroyWindow(self._hwnd)
@@ -419,11 +412,7 @@ class ListeningIndicator:
             try:
                 self._update_window()
             except Exception as exc:
-                print(
-                    f"\nListening indicator warning: {exc}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                self._print_exception_warning(exc)
                 if self._hwnd is not None:
                     self._user32.ShowWindow(self._hwnd, self.SW_HIDE)
             return 0
@@ -434,6 +423,14 @@ class ListeningIndicator:
             self._user32.KillTimer(hwnd, self.TIMER_ID)
             return 0
         return self._user32.DefWindowProcW(hwnd, message, w_param, l_param)
+
+    def _print_exception_warning(self, exc: Exception) -> None:
+        print(
+            "\nListening indicator warning "
+            f"({type(exc).__name__}): {exc}\n{traceback.format_exc()}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     def _update_window(self) -> None:
         if self._hwnd is None:
