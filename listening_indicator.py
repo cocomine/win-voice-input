@@ -1,11 +1,15 @@
 import ctypes
+import os
 import sys
 import threading
 import traceback
+from io import BytesIO
 from ctypes import wintypes
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+from reportlab.graphics import renderPM
+from svglib.svglib import svg2rlg
 
 from win32_message_types import MSG, POINT
 
@@ -112,22 +116,29 @@ class ListeningIndicator:
     WINDOW_HEIGHT = 56
     WORK_AREA_BOTTOM_GAP_PX = 24
     TIMER_ID = 1
-    POLL_INTERVAL_MS = 80
+    # The status window is fixed near the taskbar, so 120ms is responsive
+    # enough for start/stop visibility without unnecessary timer wakeups.
+    POLL_INTERVAL_MS = 120
     STARTUP_TIMEOUT_SECONDS = 5
     SHUTDOWN_TIMEOUT_SECONDS = 2
     CLASS_NAME = "WinVoiceInputListeningIndicator"
     STATUS_TEXT = "Listening"
 
     # Pillow draws the status artwork at a higher resolution and downsamples it
-    # before Windows displays it as a layered bitmap. This avoids the jagged
-    # edges caused by direct GDI ellipse/line drawing.
+    # before Windows displays it as a layered bitmap. mic.svg is used for the
+    # microphone glyph so the status window matches the user-provided asset
+    # instead of relying on a hand-drawn icon that can drift off-center.
     RENDER_SCALE = 4
+    MIC_ICON_SIZE = 24
     PANEL_FILL_COLOR = (31, 36, 43, 238)
     PANEL_BORDER_COLOR = (83, 95, 107, 255)
     BUBBLE_FILL_COLOR = (10, 132, 255, 255)
     BUBBLE_OUTLINE_COLOR = (125, 197, 255, 255)
-    CONTENT_COLOR = (255, 255, 255, 255)
-    FONT_PATH = Path("C:/Windows/Fonts/segoeui.ttf")
+    CONTENT_COLOR_RGB = (255, 255, 255)
+    CONTENT_COLOR = (*CONTENT_COLOR_RGB, 255)
+    CONTENT_COLOR_HEX = "#{:02x}{:02x}{:02x}".format(*CONTENT_COLOR_RGB)
+    FONT_ENV_VAR = "WIN_VOICE_INPUT_STATUS_FONT"
+    FONT_FILE_NAME = "segoeui.ttf"
     FONT_SIZE = 14
 
     WM_DESTROY = 0x0002
@@ -161,8 +172,86 @@ class ListeningIndicator:
         self._memory_dc: int | None = None
         self._bitmap: int | None = None
         self._old_bitmap: int | None = None
+        self._asset_dir: Path
+        self._font_path: Path
+        self._mic_icon_image: Image.Image
         self._class_name = f"{self.CLASS_NAME}{id(self)}"
         self._window_procedure = WindowProcedure(self._handle_window_message)
+
+        if getattr(sys, "_MEIPASS", None):
+            self._asset_dir = Path(sys._MEIPASS)
+        else:
+            module_file = globals().get("__file__")
+            # Some embedded execution contexts do not provide __file__. In that
+            # case, the current working directory is the only explicit project
+            # location available, and missing assets still raise clear errors.
+            self._asset_dir = (
+                Path(module_file).resolve().parent
+                if module_file is not None
+                else Path.cwd()
+            )
+
+        font_override = os.environ.get(self.FONT_ENV_VAR)
+        if font_override:
+            self._font_path = Path(font_override).expanduser()
+        else:
+            windows_dir = os.environ.get("WINDIR")
+            if not windows_dir:
+                raise RuntimeError(
+                    "Unable to locate the Windows font directory because WINDIR "
+                    f"is not set. Set {self.FONT_ENV_VAR} to a readable .ttf "
+                    "font file such as segoeui.ttf."
+                )
+            self._font_path = Path(windows_dir) / "Fonts" / self.FONT_FILE_NAME
+
+        if not self._font_path.exists():
+            raise RuntimeError(
+                f"Required status window font is missing: {self._font_path}. "
+                f"Verify Windows Fonts contains {self.FONT_FILE_NAME}, or set "
+                f"{self.FONT_ENV_VAR} to a readable .ttf font file."
+            )
+
+        mic_svg_path = self._asset_dir / "mic.svg"
+        try:
+            mic_svg_text = mic_svg_path.read_text(encoding="utf-8").replace(
+                "currentColor",
+                self.CONTENT_COLOR_HEX,
+            )
+        except OSError as exc:
+            raise RuntimeError(
+                f"Required listening indicator SVG is missing or inaccessible: "
+                f"{mic_svg_path}. Ensure mic.svg exists beside the source file "
+                "during development and is bundled by build.ps1 for packaged "
+                "runs."
+            ) from exc
+
+        try:
+            mic_drawing = svg2rlg(BytesIO(mic_svg_text.encode("utf-8")))
+            if mic_drawing is None:
+                raise ValueError("svglib returned no drawing")
+
+            mic_size = self.MIC_ICON_SIZE * self.RENDER_SCALE
+            mic_drawing.scale(
+                mic_size / mic_drawing.width,
+                mic_size / mic_drawing.height,
+            )
+            mic_drawing.width = mic_size
+            mic_drawing.height = mic_size
+            mic_png_bytes = renderPM.drawToString(
+                mic_drawing,
+                fmt="PNG",
+                bg=None,
+                backendFmt="RGBA",
+            )
+            self._mic_icon_image = Image.open(BytesIO(mic_png_bytes)).convert(
+                "RGBA"
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Unable to render listening indicator SVG: {mic_svg_path}. "
+                "Check that mic.svg is valid SVG and that svglib/reportlab are "
+                "installed correctly."
+            ) from exc
 
         # ctypes signatures are declared once so Win32 failures appear as
         # predictable return values instead of argument-conversion surprises.
@@ -399,50 +488,14 @@ class ListeningIndicator:
             width=2 * scale,
         )
 
-        center_x = 33 * scale
-        icon_width = 3 * scale
-        draw.rounded_rectangle(
-            (
-                center_x - (5 * scale),
-                17 * scale,
-                center_x + (5 * scale),
-                31 * scale,
-            ),
-            radius=5 * scale,
-            outline=self.CONTENT_COLOR,
-            width=icon_width,
-        )
-        draw.arc(
-            (
-                center_x - (12 * scale),
-                21 * scale,
-                center_x + (12 * scale),
-                39 * scale,
-            ),
-            start=15,
-            end=165,
-            fill=self.CONTENT_COLOR,
-            width=icon_width,
-        )
-        draw.line(
-            [(center_x, 38 * scale), (center_x, 43 * scale)],
-            fill=self.CONTENT_COLOR,
-            width=icon_width,
-        )
-        draw.line(
-            [
-                (center_x - (7 * scale), 43 * scale),
-                (center_x + (7 * scale), 43 * scale),
-            ],
-            fill=self.CONTENT_COLOR,
-            width=icon_width,
+        mic_left = (33 * scale) - (self._mic_icon_image.width // 2)
+        mic_top = (28 * scale) - (self._mic_icon_image.height // 2)
+        image.alpha_composite(
+            self._mic_icon_image,
+            (mic_left, mic_top),
         )
 
-        if not self.FONT_PATH.exists():
-            raise RuntimeError(
-                f"Required status window font is missing: {self.FONT_PATH}"
-            )
-        font = ImageFont.truetype(str(self.FONT_PATH), self.FONT_SIZE * scale)
+        font = ImageFont.truetype(str(self._font_path), self.FONT_SIZE * scale)
         text_bbox = draw.textbbox((0, 0), self.STATUS_TEXT, font=font)
         text_height = text_bbox[3] - text_bbox[1]
         text_y = ((self.WINDOW_HEIGHT * scale) - text_height) // 2 - text_bbox[1]
