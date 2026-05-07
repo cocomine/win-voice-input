@@ -65,6 +65,12 @@ Shortcut note: current builds use `Ctrl+Alt+Space`. This restores the original
 shortcut after a short `Ctrl+Alt+V` test build, so `Ctrl+Alt+V` no longer
 toggles listening.
 
+First launch: if the Google service account key is missing or invalid, Win
+Voice Input shows a setup error before starting the tray app. Choose Yes to open
+Settings, select the service account `.json` file, save, then start the app
+again. Settings validates that the selected credentials path exists, is a file,
+and uses the `.json` extension before saving.
+
 Create `config.json` by copying `config.example.json`, then edit values you want to remember. If `device` is `null` or missing, the app uses the Windows default input device.
 
 Common `config.json` settings:

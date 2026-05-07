@@ -27,7 +27,11 @@ from app_config import (
 # error_dialog is intentionally imported at startup rather than inside each
 # error branch. It is a tiny Win32 wrapper, and windowed builds need it ready
 # before config, logging, PySide6, or tray startup can fail silently.
-from error_dialog import show_error_message
+from error_dialog import (
+    MESSAGE_BOX_RESULT_YES,
+    MESSAGE_BOX_YES_NO,
+    show_error_message,
+)
 from global_hotkey import HOTKEY_DISPLAY_NAME
 from hotkey_app import HotkeyDictationApp
 
@@ -282,6 +286,47 @@ def main() -> int:
             print(f"\nError: {message}", file=sys.stderr)
             return 1
 
+    def show_setup_error_and_maybe_open_settings(
+        title: str,
+        message: str,
+        console_message: str,
+    ) -> int:
+        # Credential setup errors happen before tray startup, so a windowed exe
+        # would otherwise exit without giving the user a direct path to fix
+        # config.json. The same Settings editor is opened only when the user
+        # chooses Yes; after it closes, the app exits so the next launch can
+        # reload the saved credentials cleanly.
+        logging.error(console_message)
+        response = show_error_message(
+            title,
+            (
+                f"{message}\n\n"
+                "Open Settings now?\n\n"
+                "Choose Yes to select the Google credentials JSON, then "
+                "restart Win Voice Input after saving."
+            ),
+            MESSAGE_BOX_YES_NO,
+        )
+        print(f"\nError: {console_message}", file=sys.stderr)
+        if response != MESSAGE_BOX_RESULT_YES:
+            return 1
+
+        try:
+            from config_editor import run_config_editor
+
+            return run_config_editor(config_path) or 1
+        except Exception as exc:
+            settings_message = (
+                "Unable to open the settings editor.\n\n"
+                f"{exc}\n\n"
+                "If this is a source run, install runtime dependencies from "
+                "requirements.txt."
+            )
+            logging.exception("Failed to open config editor after setup error.")
+            show_error_message("Win Voice Input Settings Error", settings_message)
+            print(f"\nError: {settings_message}", file=sys.stderr)
+            return 1
+
     settings = {
         "credentials": "",
         "device": None,
@@ -362,18 +407,13 @@ def main() -> int:
 
     credentials_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if not credentials_env:
-        logging.error("Google credentials are not configured.")
-        show_error_message(
+        return show_setup_error_and_maybe_open_settings(
             "Win Voice Input Setup Error",
+            "Google credentials are not configured.\n\n"
             "Please set Google credentials in config.json or "
             "GOOGLE_APPLICATION_CREDENTIALS.",
+            "Google credentials are not configured.",
         )
-        print(
-            "\nError: Please set Google credentials in config.json or "
-            "GOOGLE_APPLICATION_CREDENTIALS.",
-            file=sys.stderr,
-        )
-        return 1
 
     credentials_file = Path(credentials_env)
     try:
@@ -383,62 +423,42 @@ def main() -> int:
         # readable service account JSON file the first listening session cannot
         # create a Google STT stream, so starting tray/hotkey UI would only
         # delay the same failure until the user presses Start.
-        logging.error("Google credentials file does not exist: %s", credentials_file)
-        show_error_message(
+        return show_setup_error_and_maybe_open_settings(
             "Win Voice Input Setup Error",
             "Google service account key file was not found:\n"
             f"{credentials_file}\n\n"
             "Please select the correct JSON key in Settings, edit config.json, "
             "or update GOOGLE_APPLICATION_CREDENTIALS.",
+            f"Google credentials file does not exist: {credentials_file}",
         )
-        print(
-            "\nError: Google service account key file was not found: "
-            f"{credentials_file}",
-            file=sys.stderr,
-        )
-        return 1
     except OSError as exc:
         # The service account key is required before microphone, tray, or
         # Google STT startup. Checking it here turns an otherwise delayed Google
         # client failure into a clear startup message for windowed builds.
-        logging.exception(
-            "Failed to inspect Google credentials file: %s",
-            credentials_file,
-        )
-        show_error_message(
+        logging.exception("Failed to inspect Google credentials file.")
+        return show_setup_error_and_maybe_open_settings(
             "Win Voice Input Setup Error",
             "Unable to check the Google service account key file:\n"
             f"{credentials_file}\n\n"
             f"{type(exc).__name__}: {exc}\n\n"
             "Please verify the credentials path in config.json or "
             "GOOGLE_APPLICATION_CREDENTIALS.",
+            "Unable to check the Google service account key file: "
+            f"{credentials_file}. {type(exc).__name__}: {exc}",
         )
-        print(
-            "\nError: Unable to check the Google service account key file: "
-            f"{credentials_file}",
-            file=sys.stderr,
-        )
-        print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
-        return 1
 
     if not stat.S_ISREG(credentials_stat.st_mode):
         # Google authentication expects a service account JSON file, not a
         # folder or special device path. Reporting this before startup prevents
         # a delayed Google client error after the user presses the hotkey.
-        logging.error("Google credentials path is not a file: %s", credentials_file)
-        show_error_message(
+        return show_setup_error_and_maybe_open_settings(
             "Win Voice Input Setup Error",
             "Google service account key path is not a file:\n"
             f"{credentials_file}\n\n"
             "Please select a JSON key file in Settings, edit config.json, "
             "or update GOOGLE_APPLICATION_CREDENTIALS.",
+            f"Google credentials path is not a file: {credentials_file}",
         )
-        print(
-            "\nError: Google service account key path is not a file: "
-            f"{credentials_file}",
-            file=sys.stderr,
-        )
-        return 1
 
     if args.language is not None:
         settings["language"] = args.language

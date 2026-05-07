@@ -1,5 +1,6 @@
 import json
 import logging
+import stat
 import sys
 from pathlib import Path
 
@@ -233,12 +234,84 @@ class ConfigEditorWindow:
             "JSON files (*.json);;All files (*.*)",
         )
         if selected_path:
+            if self._validate_credentials_path(selected_path) is None:
+                return
             self.credentials_edit.setText(selected_path)
+
+    def _validate_credentials_path(self, credentials_text: str) -> Path | None:
+        from PySide6.QtWidgets import QMessageBox
+
+        credentials_text = credentials_text.strip()
+        if not credentials_text:
+            # The windowed app cannot start dictation without Google
+            # credentials. Blocking an empty value here gives first-time users a
+            # clear fix before config.json is written.
+            QMessageBox.critical(
+                self.window,
+                "Invalid Google credentials",
+                "Google credentials JSON is required.",
+            )
+            return None
+
+        credentials_path = Path(credentials_text)
+        if not credentials_path.is_absolute():
+            # Runtime resolves relative credential paths against config.json.
+            # The editor validates the same resolved location so saving settings
+            # and restarting the app use identical path rules.
+            credentials_path = self.config_path.parent / credentials_path
+
+        if credentials_path.suffix.lower() != ".json":
+            QMessageBox.critical(
+                self.window,
+                "Invalid Google credentials",
+                "Google credentials must be a .json file:\n"
+                f"{credentials_path}",
+            )
+            return None
+
+        try:
+            credentials_stat = credentials_path.stat()
+        except FileNotFoundError:
+            QMessageBox.critical(
+                self.window,
+                "Invalid Google credentials",
+                "Google credentials file does not exist:\n"
+                f"{credentials_path}",
+            )
+            return None
+        except OSError as exc:
+            QMessageBox.critical(
+                self.window,
+                "Invalid Google credentials",
+                "Unable to check Google credentials file:\n"
+                f"{credentials_path}\n\n"
+                f"{type(exc).__name__}: {exc}",
+            )
+            logger.exception(
+                "Config editor failed to inspect credentials file: %s",
+                credentials_path,
+            )
+            return None
+
+        if not stat.S_ISREG(credentials_stat.st_mode):
+            QMessageBox.critical(
+                self.window,
+                "Invalid Google credentials",
+                "Google credentials path is not a file:\n"
+                f"{credentials_path}",
+            )
+            return None
+
+        return credentials_path
 
     def _save_config(self) -> None:
         from PySide6.QtWidgets import QMessageBox
 
-        self.config_data["credentials"] = self.credentials_edit.text().strip()
+        credentials_text = self.credentials_edit.text().strip()
+        if self._validate_credentials_path(credentials_text) is None:
+            return
+
+        self.config_data["credentials"] = credentials_text
         self.config_data["device"] = self.device_combo.currentData()
         self.config_data["language"] = self.language_edit.text().strip() or DEFAULT_LANGUAGE
         self.config_data["rate"] = int(self.rate_spin.value())
