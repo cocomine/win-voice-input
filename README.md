@@ -61,8 +61,9 @@ Daily use with `config.json`:
 powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1
 ```
 
-Shortcut note: current builds use `Ctrl+Alt+Space`. Recent test builds used
-`Ctrl+Alt+V`, which no longer toggles listening.
+Shortcut note: current builds use `Ctrl+Alt+Space`. This restores the original
+shortcut after a short `Ctrl+Alt+V` test build, so `Ctrl+Alt+V` no longer
+toggles listening.
 
 Create `config.json` by copying `config.example.json`, then edit values you want to remember. If `device` is `null` or missing, the app uses the Windows default input device.
 

@@ -6,9 +6,9 @@ from win32_message_types import MSG
 
 
 HOTKEY_ID_TOGGLE_LISTENING = 1
-# Ctrl+Alt+Space is used as the single start/pause shortcut because it is the
-# original workflow shortcut for this app and avoids sitting beside normal
-# Ctrl+V paste muscle memory while dictating into active Windows applications.
+# Ctrl+Alt+Space was the original workflow shortcut and has been restored after
+# a short Ctrl+Alt+V test build. Keeping the toggle away from Ctrl+V reduces the
+# chance of confusing normal paste behavior while dictating into active apps.
 HOTKEY_DISPLAY_NAME = "Ctrl+Alt+Space"
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
