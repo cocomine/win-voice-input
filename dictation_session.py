@@ -16,9 +16,9 @@ def listen(
     stop_event: threading.Event | None = None,
 ) -> None:
     client = speech.SpeechClient()
-    # Hotkey mode passes in its own event so pressing Ctrl+Alt+Space can stop
-    # this session. Non-hotkey mode still needs a local event so idle timeout can
-    # close the stream without changing the caller's control flow.
+    # Hotkey mode passes in its own event so pressing the configured shortcut
+    # can stop this session. Non-hotkey mode still needs a local event so idle
+    # timeout can close the stream without changing the caller's control flow.
     session_stop_event = stop_event if stop_event is not None else threading.Event()
     idle_timer: threading.Timer | None = None
 

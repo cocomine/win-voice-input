@@ -12,7 +12,7 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Shows a small listening indicator near the active text caret while listening.
 - Uses `mic.svg` in green while listening, and automatically recolors `mic-mute.svg` for Windows light or dark system UI while not listening.
 - Plays `start.mp3` when listening begins and `end.mp3` when listening stops.
-- Uses `Ctrl+Alt+Space` or the tray menu to start or pause listening.
+- Uses `Ctrl+Alt+V` or the tray menu to start or pause listening.
 - Stops the current listening session after 5 seconds without recognized text.
 - Voice commands are disabled by default, so recognized text is pasted as-is.
 - Reads optional settings from `config.json`; without a device setting, it uses the Windows default input device.
@@ -49,8 +49,8 @@ This workspace already has a local `.venv` with the dependencies installed, so y
 - `dictation_session.py` - Google Speech-to-Text streaming session.
 - `windows_text_output.py` - Windows clipboard and keyboard paste integration.
 - `dictation_controller.py` - shared start/stop lifecycle for hotkey and tray UI.
-- `global_hotkey.py` - global `Ctrl+Alt+Space` Win32 hotkey listener.
-- `hotkey_app.py` - global `Ctrl+Alt+Space` start/pause control.
+- `global_hotkey.py` - global `Ctrl+Alt+V` Win32 hotkey listener.
+- `hotkey_app.py` - global `Ctrl+Alt+V` start/pause control.
 - `tray_app.py` - system tray icon, status display, and tray menu.
 - `listening_indicator.py` - floating listening indicator near the active Windows caret.
 - `text_processing.py` - optional command-word conversion and duplicate filtering.
@@ -66,6 +66,9 @@ Daily use with `config.json`:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1
 ```
+
+Shortcut note: current builds use `Ctrl+Alt+V`. Earlier test builds used
+`Ctrl+Alt+Space`, which no longer toggles listening.
 
 Create `config.json` by copying `config.example.json`, then edit values you want to remember. If `device` is `null` or missing, the app uses the Windows default input device.
 
@@ -113,7 +116,7 @@ Start listening with the default microphone:
 powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json"
 ```
 
-After it starts, a tray icon appears in the Windows notification area. Click into Notepad, Word, a browser text box, or any other target app. Press `Ctrl+Alt+Space` or use the tray menu to start listening. Press `Ctrl+Alt+Space` again, or choose Pause from the tray menu, to stop the current session.
+After it starts, a tray icon appears in the Windows notification area. Click into Notepad, Word, a browser text box, or any other target app. Press `Ctrl+Alt+V` or use the tray menu to start listening. Press `Ctrl+Alt+V` again, or choose Pause from the tray menu, to stop the current session.
 
 On startup, the console prints the input device it will use. If no device is configured, it prints the current Windows default input device.
 

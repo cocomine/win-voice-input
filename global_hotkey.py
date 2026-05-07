@@ -6,9 +6,13 @@ from win32_message_types import MSG
 
 
 HOTKEY_ID_TOGGLE_LISTENING = 1
+# Ctrl+Alt+V was chosen for the current tray workflow because it is close to
+# Windows paste muscle memory while the extra Alt modifier prevents the app from
+# intercepting normal Ctrl+V paste operations in the active application.
+HOTKEY_DISPLAY_NAME = "Ctrl+Alt+V"
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
-VK_SPACE = 0x20
+VK_V = 0x56
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
 
@@ -59,15 +63,15 @@ class GlobalHotkeyListener:
         hotkey_registered = False
 
         try:
-            # RegisterHotKey asks Windows to deliver Ctrl+Alt+Space even when
-            # another app has focus. The listener raises immediately if Windows
-            # rejects the hotkey, because silently choosing another shortcut
-            # would change user control behavior.
+            # RegisterHotKey asks Windows to deliver the configured shortcut
+            # even when another app has focus. The listener raises immediately
+            # if Windows rejects the hotkey, because silently choosing another
+            # shortcut would change user control behavior.
             if not self._user32.RegisterHotKey(
                 None,
                 HOTKEY_ID_TOGGLE_LISTENING,
                 MOD_CONTROL | MOD_ALT,
-                VK_SPACE,
+                VK_V,
             ):
                 raise ctypes.WinError()
             hotkey_registered = True

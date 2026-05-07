@@ -1,6 +1,6 @@
 from app_config import AudioSettings, DictationSettings
 from dictation_controller import DictationController
-from global_hotkey import GlobalHotkeyListener
+from global_hotkey import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
 from listening_indicator import ListeningIndicator
 
 
@@ -24,7 +24,7 @@ class HotkeyDictationApp:
         self.listening_indicator = ListeningIndicator()
 
     def run(self) -> None:
-        print("Status: Idle. Press Ctrl+Alt+Space to start or pause.")
+        print(f"Status: Idle. Press {HOTKEY_DISPLAY_NAME} to start or pause.")
         print("Press Ctrl+C in this terminal to exit.\n")
 
         try:
@@ -36,10 +36,10 @@ class HotkeyDictationApp:
     def _on_status_change(self, status: str) -> None:
         if status == "Listening":
             self.listening_indicator.show()
-            print("Status: Listening. Press Ctrl+Alt+Space to pause.")
+            print(f"Status: Listening. Press {HOTKEY_DISPLAY_NAME} to pause.")
         elif status == "Stopping":
             self.listening_indicator.hide()
             print("Status: Stopping current dictation session...")
         elif status == "Idle":
             self.listening_indicator.hide()
-            print("Status: Idle. Press Ctrl+Alt+Space to start.")
+            print(f"Status: Idle. Press {HOTKEY_DISPLAY_NAME} to start.")

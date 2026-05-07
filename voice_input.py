@@ -16,6 +16,7 @@ from app_config import (
     DictationSettings,
 )
 from dictation_session import listen
+from global_hotkey import HOTKEY_DISPLAY_NAME
 from hotkey_app import HotkeyDictationApp
 
 
@@ -24,7 +25,11 @@ def main() -> int:
     # behavior is delegated to focused modules so code review can inspect audio,
     # STT, Windows output, and hotkey control independently.
     parser = argparse.ArgumentParser(
-        description="Stream microphone audio to Google Speech-to-Text."
+        description="Stream microphone audio to Google Speech-to-Text.",
+        epilog=(
+            f"Shortcut note: current builds use {HOTKEY_DISPLAY_NAME}; "
+            "earlier test builds used Ctrl+Alt+Space."
+        ),
     )
     parser.add_argument(
         "--config",
@@ -79,15 +84,15 @@ def main() -> int:
         default=None,
         help=(
             "Use console hotkey mode. Tray mode already includes "
-            "Ctrl+Alt+Space, so pass --hotkey without --tray to select the "
-            "non-tray UI."
+            f"{HOTKEY_DISPLAY_NAME}, so pass --hotkey without --tray to "
+            "select the non-tray UI."
         ),
     )
     parser.add_argument(
         "--no-hotkey",
         dest="hotkey",
         action="store_false",
-        help="Do not use global Ctrl+Alt+Space hotkey mode.",
+        help=f"Do not use global {HOTKEY_DISPLAY_NAME} hotkey mode.",
     )
     parser.add_argument(
         "--tray",
@@ -96,7 +101,7 @@ def main() -> int:
         default=None,
         help=(
             "Show a system tray icon with status, Start/Pause/Exit controls, "
-            "and Ctrl+Alt+Space."
+            f"and {HOTKEY_DISPLAY_NAME}."
         ),
     )
     parser.add_argument(
@@ -164,7 +169,7 @@ def main() -> int:
     if args.tray is True and args.hotkey is True:
         parser.error(
             "--tray and --hotkey cannot be used together because tray mode "
-            "already includes Ctrl+Alt+Space."
+            f"already includes {HOTKEY_DISPLAY_NAME}."
         )
 
     if args.list_devices:
@@ -310,8 +315,8 @@ def main() -> int:
             ).run()
         elif settings["hotkey"]:
             # Hotkey mode starts idle and creates a listening session only after
-            # Ctrl+Alt+Space. This avoids recording or billing while the user is
-            # not actively dictating.
+            # the configured shortcut. This avoids recording or billing while
+            # the user is not actively dictating.
             HotkeyDictationApp(
                 str(settings["language"]),
                 audio_settings,

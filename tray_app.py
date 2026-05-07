@@ -11,7 +11,7 @@ from svglib.svglib import svg2rlg
 
 from app_config import AudioSettings, DictationSettings
 from dictation_controller import DictationController
-from global_hotkey import GlobalHotkeyListener
+from global_hotkey import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
 from listening_indicator import ListeningIndicator
 
 
@@ -124,8 +124,8 @@ class TrayDictationApp:
             menu,
         )
         print(
-            "Tray icon started. Press Ctrl+Alt+Space or use the tray menu "
-            "to start or pause."
+            f"Tray icon started. Press {HOTKEY_DISPLAY_NAME} or use the "
+            "tray menu to start or pause."
         )
         self.icon.run(setup=self._on_setup)
 
@@ -136,8 +136,8 @@ class TrayDictationApp:
         icon.visible = True
 
         # pystray owns the main UI loop after icon.run(). The hotkey listener
-        # therefore runs in one background thread so Ctrl+Alt+Space remains
-        # available while the tray menu is open or idle.
+        # therefore runs in one background thread so the configured shortcut
+        # remains available while the tray menu is open or idle.
         self._hotkey_thread = threading.Thread(
             target=self._run_hotkey_listener,
             daemon=True,
