@@ -314,7 +314,12 @@ def main() -> int:
         try:
             from config_editor import run_config_editor
 
-            return run_config_editor(config_path) or 1
+            settings_result = run_config_editor(config_path)
+            # The settings editor is a recovery path for startup setup errors.
+            # When it closes successfully, the app exits successfully as well;
+            # the next launch reloads config.json and starts tray/hotkey mode
+            # with the corrected credentials.
+            return settings_result
         except Exception as exc:
             settings_message = (
                 "Unable to open the settings editor.\n\n"

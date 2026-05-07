@@ -308,9 +308,18 @@ class ConfigEditorWindow:
         from PySide6.QtWidgets import QMessageBox
 
         credentials_text = self.credentials_edit.text().strip()
-        if self._validate_credentials_path(credentials_text) is None:
+        validated_credentials_path = self._validate_credentials_path(credentials_text)
+        if validated_credentials_path is None:
             return
 
+        # Validation uses the resolved path so relative config values are
+        # checked against config.json's folder. The saved value intentionally
+        # remains the user's original text, preserving portable relative paths
+        # such as ".\\serviceworker.json" in source and packaged folders.
+        logger.info(
+            "Validated credentials path for config save: %s",
+            validated_credentials_path,
+        )
         self.config_data["credentials"] = credentials_text
         self.config_data["device"] = self.device_combo.currentData()
         self.config_data["language"] = self.language_edit.text().strip() or DEFAULT_LANGUAGE
