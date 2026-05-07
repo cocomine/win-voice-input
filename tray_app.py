@@ -1,5 +1,6 @@
 import sys
 import threading
+import winreg
 from io import BytesIO
 from pathlib import Path
 
@@ -19,11 +20,15 @@ class TrayDictationApp:
     # controls and mirrors controller status into the icon and menu.
     ICON_SIZE = 64
     # These colors are part of the user-visible tray status language. White is
-    # the requested muted color; it can have lower contrast on light Windows
-    # tray backgrounds, so the hover title and start/end sounds remain parallel
-    # status cues instead of relying on color alone.
+    # kept for dark Windows system UI, while dark gray is used on light system
+    # UI so the muted icon stays visible against a light taskbar.
     LISTENING_ICON_COLOR = "#20AA55"
-    MUTED_ICON_COLOR = "#FFFFFF"
+    MUTED_ICON_COLOR_ON_DARK_SYSTEM_UI = "#FFFFFF"
+    MUTED_ICON_COLOR_ON_LIGHT_SYSTEM_UI = "#303030"
+    THEME_REGISTRY_PATH = (
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
+    )
+    SYSTEM_LIGHT_THEME_VALUE = "SystemUsesLightTheme"
 
     def __init__(
         self,
@@ -44,9 +49,43 @@ class TrayDictationApp:
         # keep the SVG files next to this module. This chooses the correct asset
         # directory for both modes without changing which SVG files are required.
         asset_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                self.THEME_REGISTRY_PATH,
+            ) as key:
+                system_uses_light_theme = winreg.QueryValueEx(
+                    key,
+                    self.SYSTEM_LIGHT_THEME_VALUE,
+                )[0]
+        except FileNotFoundError:
+            # Some Windows versions or fresh profiles can omit this value until
+            # Personalization settings are changed. Because white can disappear
+            # on light taskbars, an absent value uses the light-UI contrast
+            # choice. This is a conservative visibility choice, not a claim that
+            # every Windows version defaults to light system UI.
+            system_uses_light_theme = 1
+        except OSError as exc:
+            raise RuntimeError(
+                "Unable to read Windows system theme for tray icon color from "
+                f"HKCU\\{self.THEME_REGISTRY_PATH}\\"
+                f"{self.SYSTEM_LIGHT_THEME_VALUE}: {exc}"
+            ) from exc
+
+        if system_uses_light_theme == 1:
+            self._muted_icon_color = self.MUTED_ICON_COLOR_ON_LIGHT_SYSTEM_UI
+        elif system_uses_light_theme == 0:
+            self._muted_icon_color = self.MUTED_ICON_COLOR_ON_DARK_SYSTEM_UI
+        else:
+            raise RuntimeError(
+                "Unexpected Windows system theme value from "
+                f"HKCU\\{self.THEME_REGISTRY_PATH}\\"
+                f"{self.SYSTEM_LIGHT_THEME_VALUE}: expected 0 or 1, "
+                f"got {system_uses_light_theme!r}."
+            )
         muted_icon = self._render_svg_icon(
             asset_dir / "mic-mute.svg",
-            self.MUTED_ICON_COLOR,
+            self._muted_icon_color,
         )
         self._images = {
             "Idle": muted_icon,

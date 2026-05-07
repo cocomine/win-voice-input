@@ -9,7 +9,7 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Prints interim and final transcripts in the terminal.
 - Pastes final transcripts into the active Windows app.
 - Shows a system tray icon with Idle / Listening / Stopping status.
-- Uses `mic.svg` in green while listening, and `mic-mute.svg` in white while not listening.
+- Uses `mic.svg` in green while listening, and automatically recolors `mic-mute.svg` for Windows light or dark system UI while not listening.
 - Plays `start.mp3` when listening begins and `end.mp3` when listening stops.
 - Uses `Ctrl+Alt+Space` or the tray menu to start or pause listening.
 - Stops the current listening session after 5 seconds without recognized text.
