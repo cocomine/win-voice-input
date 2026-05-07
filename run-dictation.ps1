@@ -21,6 +21,7 @@ param(
 # Built-in defaults mirror the Python defaults and previous script behavior.
 # They are used only when config.json omits a value and the user does not pass a
 # command-line override.
+$configWasExplicit = $PSBoundParameters.ContainsKey("ConfigPath")
 $settings = [ordered]@{
     Credentials = ""
     Device = $null
@@ -58,6 +59,12 @@ if (Test-Path -LiteralPath $ConfigPath) {
     if ($null -ne $config.appendSpace) { $settings.AppendSpace = [bool]$config.appendSpace }
     if ($null -ne $config.finalDedupeSeconds) { $settings.FinalDedupeSeconds = $config.finalDedupeSeconds }
     if ($null -ne $config.idleTimeoutSeconds) { $settings.IdleTimeoutSeconds = $config.idleTimeoutSeconds }
+} elseif ($configWasExplicit) {
+    # A manually supplied config path is expected to be real. Stopping here
+    # prevents the wrapper and Python entry point from silently running with
+    # different settings.
+    Write-Host "Config file does not exist: $ConfigPath"
+    exit 1
 }
 
 # Command-line arguments are applied last because an explicit invocation should
@@ -104,6 +111,14 @@ $arguments = @(
     "--final-dedupe-seconds", $settings.FinalDedupeSeconds,
     "--idle-timeout-seconds", $settings.IdleTimeoutSeconds
 )
+
+if ((Test-Path -LiteralPath $ConfigPath) -or $configWasExplicit) {
+    # Python now reads config.json directly so the same behavior works after
+    # packaging into an exe. Passing the path keeps PowerShell runs and exe runs
+    # aligned, especially when a non-default config path is used for testing.
+    $arguments += "--config"
+    $arguments += $ConfigPath
+}
 
 if ($null -ne $settings.Device) {
     # Omitting --device is intentional: sounddevice then opens the Windows

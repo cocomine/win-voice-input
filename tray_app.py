@@ -18,6 +18,11 @@ class TrayDictationApp:
     # microphone, Google STT, or paste logic; it only exposes Start/Pause/Exit
     # controls and mirrors controller status into the icon and menu.
     ICON_SIZE = 64
+    # These colors are part of the user-visible tray status language: green
+    # means microphone input is being streamed, gray means no listening session
+    # is active.
+    LISTENING_ICON_COLOR = "#20AA55"
+    MUTED_ICON_COLOR = "#808080"
 
     def __init__(
         self,
@@ -34,14 +39,20 @@ class TrayDictationApp:
         self.hotkey_listener = GlobalHotkeyListener()
         self.icon: pystray.Icon | None = None
         self._hotkey_thread: threading.Thread | None = None
-        project_dir = Path(__file__).resolve().parent
+        # PyInstaller unpacks bundled data files into sys._MEIPASS. Source runs
+        # keep the SVG files next to this module. This chooses the correct asset
+        # directory for both modes without changing which SVG files are required.
+        asset_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         muted_icon = self._render_svg_icon(
-            project_dir / "mic-mute.svg",
-            "#ffffff",
+            asset_dir / "mic-mute.svg",
+            self.MUTED_ICON_COLOR,
         )
         self._images = {
             "Idle": muted_icon,
-            "Listening": self._render_svg_icon(project_dir / "mic.svg", "#20AA55"),
+            "Listening": self._render_svg_icon(
+                asset_dir / "mic.svg",
+                self.LISTENING_ICON_COLOR,
+            ),
             "Stopping": muted_icon,
         }
 

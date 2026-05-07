@@ -14,6 +14,7 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Stops the current listening session after 5 seconds without recognized text.
 - Voice commands are disabled by default, so recognized text is pasted as-is.
 - Reads optional settings from `config.json`; without a device setting, it uses the Windows default input device.
+- Can be packaged as a Windows `.exe` with the tray SVG assets included.
 - Defaults to Hong Kong Cantonese: `yue-Hant-HK`.
 
 Interim text is only shown in the terminal. Only final text is pasted.
@@ -51,6 +52,8 @@ This workspace already has a local `.venv` with the dependencies installed, so y
 - `tray_app.py` - system tray icon, status display, and tray menu.
 - `text_processing.py` - optional command-word conversion and duplicate filtering.
 - `config.example.json` - optional local settings template.
+- `build.ps1` - PyInstaller build script for creating `WinVoiceInput.exe`.
+- `requirements-build.txt` - build-only dependency list.
 
 ## Run
 
@@ -67,6 +70,38 @@ List microphones:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\list-devices.ps1
 ```
+
+## Build Windows Exe
+
+Install the build-only dependency into the same `.venv`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+```
+
+Build the first test package:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+```
+
+The output is:
+
+```text
+dist\WinVoiceInput\WinVoiceInput.exe
+```
+
+The default build keeps a console window open so startup errors, microphone
+selection, and Google authentication messages are visible during testing. After
+the package is stable, build without the console window:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build.ps1 -Windowed
+```
+
+For daily packaged use, place a `config.json` beside `WinVoiceInput.exe` in
+`dist\WinVoiceInput`. The app reads that file directly, so the packaged exe does
+not need `run-dictation.ps1`.
 
 Start listening with the default microphone:
 
@@ -143,4 +178,4 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 - Paste mode uses the Windows clipboard, so your clipboard content will be replaced by the latest final transcript.
 - Duplicate protection can be enabled with `-FinalDedupeSeconds 0.8`. The current script default is `0`.
 - Idle auto-stop is enabled by default with `-IdleTimeoutSeconds 5`; use `0` to disable it.
-- The next version can package the app as an `.exe`.
+- The packaged exe reads `config.json` from the same folder as `WinVoiceInput.exe`.

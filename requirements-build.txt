@@ -1,0 +1,3 @@
+# Build-only dependency. Runtime dependencies stay in requirements.txt so daily
+# use does not install packaging tools.
+pyinstaller>=6.11.0
