@@ -1,8 +1,10 @@
 import argparse
 import json
+import logging
 import os
 import sys
 import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import sounddevice as sd
@@ -25,6 +27,10 @@ from global_hotkey import HOTKEY_DISPLAY_NAME
 from hotkey_app import HotkeyDictationApp
 
 IMMEDIATE_MODE_STATUS_POLL_SECONDS = 0.1
+LOG_FOLDER_NAME = "WinVoiceInput"
+LOG_FILE_NAME = "win-voice-input.log"
+LOG_MAX_BYTES = 1_048_576
+LOG_BACKUP_COUNT = 5
 
 
 def main() -> int:
@@ -181,9 +187,47 @@ def main() -> int:
 
     if args.list_devices:
         # Listing devices must not create a Google client or touch Windows
-        # clipboard state. It is a read-only diagnostic path for microphone setup.
+        # clipboard state. It is a read-only diagnostic path for microphone setup,
+        # so it also avoids creating app log files as a side effect.
         print(sd.query_devices())
         return 0
+
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        print(
+            "\nError: LOCALAPPDATA is not set, so the app cannot create logs.",
+            file=sys.stderr,
+        )
+        return 1
+
+    log_dir = Path(local_app_data) / LOG_FOLDER_NAME / "logs"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(f"\nError: Failed to create log folder: {log_dir}", file=sys.stderr)
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    # Windowed builds have no console, so file logging is initialized before
+    # config and runtime setup. Existing print() calls remain the test-build
+    # console output, while the rotating file keeps daily logs bounded.
+    log_formatter = logging.Formatter(
+        "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+    )
+    file_handler = RotatingFileHandler(
+        log_dir / LOG_FILE_NAME,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(log_formatter)
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+        handler.close()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
+    logging.info("Logging started: %s", log_dir / LOG_FILE_NAME)
 
     # A packaged executable cannot rely on run-dictation.ps1 to read config.
     # Config is therefore loaded in the Python entry point as well. Missing
@@ -199,6 +243,7 @@ def main() -> int:
     else:
         config_path = Path(args.config).resolve()
         config_was_explicit = True
+    logging.info("Using config path: %s", config_path)
 
     settings = {
         "credentials": "",
@@ -222,11 +267,13 @@ def main() -> int:
         try:
             config_data = json.loads(config_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
+            logging.exception("Failed to read config file: %s", config_path)
             print(f"\nError: Failed to read config file: {config_path}", file=sys.stderr)
             print(str(exc), file=sys.stderr)
             return 1
 
         if not isinstance(config_data, dict):
+            logging.error("Config file is not a JSON object: %s", config_path)
             print(f"\nError: Config file must contain a JSON object: {config_path}", file=sys.stderr)
             return 1
 
@@ -251,6 +298,7 @@ def main() -> int:
             if config_name in config_data:
                 settings[setting_name] = config_data[config_name]
     elif config_was_explicit:
+        logging.error("Config file does not exist: %s", config_path)
         print(f"\nError: Config file does not exist: {config_path}", file=sys.stderr)
         return 1
 
@@ -264,6 +312,7 @@ def main() -> int:
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(credentials_path)
 
     if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        logging.error("Google credentials are not configured.")
         print(
             "\nError: Please set Google credentials in config.json or "
             "GOOGLE_APPLICATION_CREDENTIALS.",
@@ -304,6 +353,10 @@ def main() -> int:
     ).strip().lower()
     if listening_indicator_position not in ALLOWED_LISTENING_INDICATOR_POSITIONS:
         allowed_positions = ", ".join(ALLOWED_LISTENING_INDICATOR_POSITIONS)
+        logging.error(
+            "Invalid listeningIndicatorPosition: %r",
+            settings["listening_indicator_position"],
+        )
         print(
             "\nError: Invalid listeningIndicatorPosition in config.json: "
             f"{settings['listening_indicator_position']!r}. Expected one of: "
@@ -339,6 +392,7 @@ def main() -> int:
 
     try:
         if settings["tray"]:
+            logging.info("Starting tray mode.")
             # Tray mode owns its own UI loop and also starts a background global
             # hotkey listener. Importing here keeps non-tray commands usable
             # without loading tray-only dependencies.
@@ -349,8 +403,11 @@ def main() -> int:
                 audio_settings,
                 dictation_settings,
                 feedback_settings,
+                config_path,
+                log_dir,
             ).run()
         elif settings["hotkey"]:
+            logging.info("Starting console hotkey mode.")
             # Hotkey mode starts idle and creates a listening session only after
             # the configured shortcut. This avoids recording or billing while
             # the user is not actively dictating.
@@ -361,6 +418,7 @@ def main() -> int:
                 feedback_settings,
             ).run()
         else:
+            logging.info("Starting immediate listening mode.")
             # Non-hotkey mode still starts immediately, but it uses the same
             # controller as tray/hotkey mode so config-driven feedback settings
             # such as status sounds and the listening indicator stay consistent.
@@ -405,9 +463,11 @@ def main() -> int:
                 if listening_indicator is not None:
                     listening_indicator.shutdown()
     except KeyboardInterrupt:
+        logging.info("Stopped by KeyboardInterrupt.")
         print("\nStopped.")
         return 0
     except Exception as exc:
+        logging.exception("Unhandled application error.")
         print(f"\nError: {exc}", file=sys.stderr)
         return 1
 

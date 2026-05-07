@@ -1,7 +1,11 @@
+import logging
+
 from app_config import AudioSettings, DictationSettings, FeedbackSettings
 from dictation_controller import DictationController
 from global_hotkey import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
 from listening_indicator import ListeningIndicator
+
+logger = logging.getLogger(__name__)
 
 
 class HotkeyDictationApp:
@@ -30,6 +34,7 @@ class HotkeyDictationApp:
         )
 
     def run(self) -> None:
+        logger.info("Console hotkey app started.")
         print(f"Status: Idle. Press {HOTKEY_DISPLAY_NAME} to start or pause.")
         print("Press Ctrl+C in this terminal to exit.\n")
 
@@ -41,6 +46,7 @@ class HotkeyDictationApp:
                 self.listening_indicator.shutdown()
 
     def _on_status_change(self, status: str) -> None:
+        logger.info("Hotkey app status changed: %s", status)
         if status == "Listening":
             if self.listening_indicator is not None:
                 self.listening_indicator.show()

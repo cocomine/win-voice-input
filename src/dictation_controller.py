@@ -1,3 +1,4 @@
+import logging
 import os
 import threading
 from collections.abc import Callable
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 StatusCallback = Callable[[str], None]
+logger = logging.getLogger(__name__)
 
 
 class DictationController:
@@ -140,6 +142,7 @@ class DictationController:
                 self._stop_event,
             )
         except Exception as exc:
+            logger.exception("Dictation session failed.")
             print(f"\nDictation session error: {exc}", file=sys.stderr, flush=True)
         finally:
             # Returning to Idle here covers manual pause, tray pause, and
@@ -150,6 +153,7 @@ class DictationController:
     def _set_status(self, status: str) -> None:
         previous_status = self.status
         self.status = status
+        logger.info("Dictation status changed: %s", status)
         if self.on_status_change is not None:
             self.on_status_change(status)
 
@@ -186,10 +190,12 @@ class DictationController:
         try:
             channel = sound.play()
         except self._sound_error as exc:
+            logger.warning("Status sound playback failed: %s", exc)
             print(f"\nStatus sound warning: {exc}", file=sys.stderr, flush=True)
             return
 
         if channel is None:
+            logger.warning("Status sound playback skipped: no audio channel.")
             print(
                 "\nStatus sound warning: no audio channel available.",
                 file=sys.stderr,

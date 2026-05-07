@@ -1,3 +1,5 @@
+import logging
+import os
 import sys
 import threading
 import winreg
@@ -18,6 +20,8 @@ from app_config import (
 from dictation_controller import DictationController
 from global_hotkey import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
 from listening_indicator import ListeningIndicator
+
+logger = logging.getLogger(__name__)
 
 
 class TrayDictationApp:
@@ -42,7 +46,11 @@ class TrayDictationApp:
         audio_settings: AudioSettings,
         dictation_settings: DictationSettings,
         feedback_settings: FeedbackSettings,
+        config_path: Path,
+        log_dir: Path,
     ):
+        self.config_path = config_path
+        self.log_dir = log_dir
         self.controller = DictationController(
             language,
             audio_settings,
@@ -125,6 +133,8 @@ class TrayDictationApp:
                 self._on_pause,
                 enabled=lambda item: self.controller.status == "Listening",
             ),
+            pystray.MenuItem("Open logs folder", self._on_open_logs_folder),
+            pystray.MenuItem("Open config folder", self._on_open_config_folder),
             pystray.MenuItem("Exit", self._on_exit),
         )
         self.icon = pystray.Icon(
@@ -137,6 +147,7 @@ class TrayDictationApp:
             f"Tray icon started. Press {HOTKEY_DISPLAY_NAME} or use the "
             "tray menu to start or pause."
         )
+        logger.info("Tray icon started.")
         self.icon.run(setup=self._on_setup)
 
     def _on_setup(self, icon: pystray.Icon) -> None:
@@ -158,6 +169,7 @@ class TrayDictationApp:
         try:
             self.hotkey_listener.run(self.controller.toggle)
         except Exception as exc:
+            logger.exception("Hotkey listener failed.")
             print(f"\nHotkey listener error: {exc}", file=sys.stderr, flush=True)
             if self.icon is not None:
                 self.icon.stop()
@@ -168,6 +180,20 @@ class TrayDictationApp:
     def _on_pause(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         self.controller.stop()
 
+    def _on_open_logs_folder(
+        self,
+        icon: pystray.Icon,
+        item: pystray.MenuItem,
+    ) -> None:
+        self._open_folder(self.log_dir, "logs")
+
+    def _on_open_config_folder(
+        self,
+        icon: pystray.Icon,
+        item: pystray.MenuItem,
+    ) -> None:
+        self._open_folder(self.config_path.parent, "config")
+
     def _on_exit(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         self.controller.shutdown()
         if self.listening_indicator is not None:
@@ -177,6 +203,7 @@ class TrayDictationApp:
 
     def _on_status_change(self, status: str) -> None:
         print(f"Status: {status}")
+        logger.info("Status changed: %s", status)
         if self.listening_indicator is not None:
             if status == "Listening":
                 self.listening_indicator.show()
@@ -191,6 +218,30 @@ class TrayDictationApp:
         self.icon.icon = self._images[status]
         self.icon.title = f"Win Voice Input - {status}"
         self.icon.update_menu()
+
+    def _open_folder(self, folder_path: Path, folder_label: str) -> None:
+        # Tray callbacks run on the pystray UI thread. Opening a folder should
+        # never touch dictation state; errors are logged and shown in the
+        # console so windowed builds keep a diagnostic trail without crashing.
+        if not folder_path.is_dir():
+            message = f"{folder_label.title()} folder does not exist: {folder_path}"
+            logger.error(message)
+            print(f"\n{message}", file=sys.stderr, flush=True)
+            return
+        try:
+            os.startfile(str(folder_path))
+            logger.info("Opened %s folder: %s", folder_label, folder_path)
+        except OSError as exc:
+            logger.exception(
+                "Failed to open %s folder: %s",
+                folder_label,
+                folder_path,
+            )
+            print(
+                f"\nFailed to open {folder_label} folder: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     def _render_svg_icon(self, svg_path: Path, color: str) -> Image.Image:
         # The user-provided SVG files are the source of truth for tray artwork.

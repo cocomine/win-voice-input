@@ -1,3 +1,4 @@
+import logging
 import queue
 import sys
 import threading
@@ -5,6 +6,8 @@ import threading
 import sounddevice as sd
 
 from app_config import AudioSettings
+
+logger = logging.getLogger(__name__)
 
 
 class MicrophoneStream:
@@ -28,11 +31,17 @@ class MicrophoneStream:
         # Google/network work happens later in generator().
         if self.settings.device is None:
             default_device = sd.query_devices(kind="input")
+            logger.info(
+                "Using default input device: %s (index %s)",
+                default_device["name"],
+                default_device["index"],
+            )
             print(
                 "Using default input device: "
                 f"{default_device['name']} (index {default_device['index']})"
             )
         else:
+            logger.info("Using configured input device index: %s", self.settings.device)
             print(f"Using configured input device index: {self.settings.device}")
 
         self.closed = False
@@ -57,6 +66,7 @@ class MicrophoneStream:
 
     def _callback(self, indata, frames, time_info, status):
         if status:
+            logger.warning("Audio callback status: %s", status)
             print(f"\nAudio warning: {status}", file=sys.stderr)
         # bytes(indata) copies the PortAudio buffer before the callback returns.
         # Without the copy, later code could read memory that PortAudio has

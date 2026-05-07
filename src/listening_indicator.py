@@ -1,4 +1,5 @@
 import ctypes
+import logging
 import os
 import sys
 import threading
@@ -17,6 +18,8 @@ from app_config import (
     get_asset_dir,
 )
 from win32_message_types import MSG, POINT
+
+logger = logging.getLogger(__name__)
 
 LRESULT = wintypes.LPARAM
 UINT_PTR = wintypes.WPARAM
@@ -641,6 +644,10 @@ class ListeningIndicator:
         self._user32.ShowWindow(self._hwnd, self.SW_SHOWNOACTIVATE)
 
     def _print_exception_warning(self, exc: Exception) -> None:
+        logger.error(
+            "Listening indicator warning.",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
         print(
             "\nListening indicator warning "
             f"({type(exc).__name__}): {exc}\n{traceback.format_exc()}",

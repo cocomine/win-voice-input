@@ -1,3 +1,4 @@
+import logging
 import sys
 import threading
 
@@ -7,6 +8,8 @@ from app_config import AudioSettings, DictationSettings
 from audio_capture import MicrophoneStream
 from text_processing import FinalTranscriptDeduper, prepare_text
 from windows_text_output import WindowsTextOutput
+
+logger = logging.getLogger(__name__)
 
 
 def listen(
@@ -42,9 +45,11 @@ def listen(
         # WindowsTextOutput is created only when paste mode is enabled. Console
         # mode should remain read-only and must not touch clipboard or keyboard
         # state.
+        logger.info("Listening session started with paste mode enabled.")
         print("Listening and pasting final text. Press Ctrl+C to stop.\n")
         text_output = WindowsTextOutput()
     else:
+        logger.info("Listening session started with paste mode disabled.")
         print("Listening. Press Ctrl+C to stop.\n")
         text_output = None
 
@@ -114,6 +119,7 @@ def listen(
                     continue
 
                 if not final_deduper.should_output(transcript):
+                    logger.info("Skipped duplicate final transcript.")
                     print("Skipped duplicate final paste.", flush=True)
                     continue
 
@@ -134,10 +140,12 @@ def listen(
                     # Paste errors are reported but do not end recognition. A
                     # transient clipboard lock should not throw away the active
                     # Google stream; the next final transcript can still paste.
+                    logger.warning("Paste failed: %s", exc)
                     print(f"\nPaste warning: {exc}", file=sys.stderr, flush=True)
     finally:
         # Timers and microphone streams are closed in finally so Ctrl+C, Google
         # errors, and idle timeout all release the same resources.
+        logger.info("Listening session ended.")
         if idle_timer is not None:
             idle_timer.cancel()
         if stream_context is not None:
