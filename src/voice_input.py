@@ -359,7 +359,8 @@ def main() -> int:
             credentials_path = config_path.parent / credentials_path
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(credentials_path)
 
-    if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+    credentials_env_value = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not credentials_env_value:
         logging.error("Google credentials are not configured.")
         show_error_message(
             "Win Voice Input Setup Error",
@@ -369,6 +370,53 @@ def main() -> int:
         print(
             "\nError: Please set Google credentials in config.json or "
             "GOOGLE_APPLICATION_CREDENTIALS.",
+            file=sys.stderr,
+        )
+        return 1
+
+    credentials_file = Path(credentials_env_value)
+    try:
+        credentials_file_exists = credentials_file.is_file()
+    except OSError as exc:
+        # The service account key is required before microphone, tray, or
+        # Google STT startup. Checking it here turns an otherwise delayed Google
+        # client failure into a clear startup message for windowed builds.
+        logging.exception(
+            "Failed to inspect Google credentials file: %s",
+            credentials_file,
+        )
+        show_error_message(
+            "Win Voice Input Setup Error",
+            "Unable to check the Google service account key file:\n"
+            f"{credentials_file}\n\n"
+            f"{type(exc).__name__}: {exc}\n\n"
+            "Please verify the credentials path in config.json or "
+            "GOOGLE_APPLICATION_CREDENTIALS.",
+        )
+        print(
+            "\nError: Unable to check the Google service account key file: "
+            f"{credentials_file}",
+            file=sys.stderr,
+        )
+        print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+    if not credentials_file_exists:
+        # This is intentionally a hard startup check, not a fallback. Without a
+        # readable service account JSON file the first listening session cannot
+        # create a Google STT stream, so starting tray/hotkey UI would only delay
+        # the same failure until the user presses Start.
+        logging.error("Google credentials file does not exist: %s", credentials_file)
+        show_error_message(
+            "Win Voice Input Setup Error",
+            "Google service account key file was not found:\n"
+            f"{credentials_file}\n\n"
+            "Please select the correct JSON key in Settings, edit config.json, "
+            "or update GOOGLE_APPLICATION_CREDENTIALS.",
+        )
+        print(
+            "\nError: Google service account key file was not found: "
+            f"{credentials_file}",
             file=sys.stderr,
         )
         return 1
