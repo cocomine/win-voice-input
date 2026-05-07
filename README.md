@@ -17,6 +17,7 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Stops the current listening session after 5 seconds without recognized text.
 - Voice commands are disabled by default, so recognized text is pasted as-is.
 - Reads optional settings from `config.json`; without a device setting, it uses the Windows default input device.
+- Can start automatically when the current Windows user signs in.
 - Shows fatal startup/runtime errors in a Windows message box so windowed builds do not fail silently.
 - Writes diagnostic logs to `%LOCALAPPDATA%\WinVoiceInput\logs\win-voice-input.log`.
 - Can be packaged as a Windows `.exe` with the tray SVG assets included.
@@ -131,6 +132,12 @@ Settings opens a PySide6 editor for `config.json`; saved changes take effect
 after restarting the app. Logs are written to
 `%LOCALAPPDATA%\WinVoiceInput\logs\win-voice-input.log`, which is especially
 useful after building with `-Windowed`.
+
+Settings also includes `Start with Windows`. When enabled, the app writes a
+current-user startup entry to
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\WinVoiceInput`, so no admin
+permission is required. Disable the checkbox and save to remove that startup
+entry.
 
 On startup, the console prints the input device it will use. If no device is configured, it prints the current Windows default input device.
 

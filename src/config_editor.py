@@ -2,6 +2,7 @@ import json
 import logging
 import stat
 import sys
+import winreg
 from pathlib import Path
 
 import sounddevice as sd
@@ -18,6 +19,8 @@ from app_config import (
 )
 
 logger = logging.getLogger(__name__)
+STARTUP_RUN_REGISTRY_PATH = "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+STARTUP_RUN_VALUE_NAME = "WinVoiceInput"
 
 
 class ConfigEditorWindow:
@@ -40,7 +43,22 @@ class ConfigEditorWindow:
             QWidget,
         )
 
+        import subprocess
+
         self.config_path = config_path
+        self.startup_registry_available = True
+        # Windows Run keys store a single command line string. For packaged
+        # runs, sys.executable is WinVoiceInput.exe; for source runs, the
+        # current Python executable must launch src\voice_input.py directly.
+        # --config is included so startup uses the same settings file that this
+        # editor is currently editing, even when it is not the default path.
+        startup_command_parts = [str(Path(sys.executable).resolve())]
+        if not getattr(sys, "frozen", False):
+            startup_command_parts.append(
+                str(Path(__file__).resolve().parent / "voice_input.py")
+            )
+        startup_command_parts.extend(["--config", str(self.config_path)])
+        self.startup_command = subprocess.list2cmdline(startup_command_parts)
         self.config_data = self._read_config()
         self.window = QMainWindow()
         self.window.setWindowTitle("Win Voice Input Settings")
@@ -104,6 +122,9 @@ class ConfigEditorWindow:
         for position in ALLOWED_LISTENING_INDICATOR_POSITIONS:
             self.indicator_position_combo.addItem(position, position)
         form.addRow("Indicator position", self.indicator_position_combo)
+
+        self.start_with_windows_check = QCheckBox("Start with Windows")
+        form.addRow("", self.start_with_windows_check)
 
         note = QLabel("Changes are saved to config.json and take effect after restarting the app.")
         note.setWordWrap(True)
@@ -224,6 +245,38 @@ class ConfigEditorWindow:
         if index >= 0:
             self.indicator_position_combo.setCurrentIndex(index)
 
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                STARTUP_RUN_REGISTRY_PATH,
+            ) as key:
+                startup_command = winreg.QueryValueEx(
+                    key,
+                    STARTUP_RUN_VALUE_NAME,
+                )[0]
+        except FileNotFoundError:
+            startup_command = ""
+        except OSError as exc:
+            # Reading the Run key is optional for dictation itself, but the
+            # Settings window must not pretend it knows the startup state when
+            # Windows refused access. The checkbox is disabled so Save cannot
+            # accidentally overwrite an unknown registry state.
+            from PySide6.QtWidgets import QMessageBox
+
+            self.startup_registry_available = False
+            self.start_with_windows_check.setEnabled(False)
+            QMessageBox.critical(
+                self.window,
+                "Unable to read startup setting",
+                "Unable to read Windows startup setting from:\n"
+                f"HKCU\\{STARTUP_RUN_REGISTRY_PATH}\\{STARTUP_RUN_VALUE_NAME}"
+                f"\n\n{type(exc).__name__}: {exc}",
+            )
+            logger.exception("Config editor failed to read Windows startup setting.")
+            return
+
+        self.start_with_windows_check.setChecked(bool(startup_command))
+
     def _choose_credentials_file(self) -> None:
         from PySide6.QtWidgets import QFileDialog
 
@@ -320,6 +373,7 @@ class ConfigEditorWindow:
             "Validated credentials path for config save: %s",
             validated_credentials_path,
         )
+
         self.config_data["credentials"] = credentials_text
         self.config_data["device"] = self.device_combo.currentData()
         self.config_data["language"] = self.language_edit.text().strip() or DEFAULT_LANGUAGE
@@ -355,6 +409,46 @@ class ConfigEditorWindow:
             )
             logger.exception("Config editor failed to save config: %s", self.config_path)
             return
+
+        if self.startup_registry_available:
+            try:
+                with winreg.CreateKeyEx(
+                    winreg.HKEY_CURRENT_USER,
+                    STARTUP_RUN_REGISTRY_PATH,
+                    0,
+                    winreg.KEY_SET_VALUE,
+                ) as key:
+                    if self.start_with_windows_check.isChecked():
+                        # HKCU Run launches this command after the user signs
+                        # in. The value is overwritten on Save so moving the app
+                        # folder or editing a different config path updates the
+                        # startup command deterministically.
+                        winreg.SetValueEx(
+                            key,
+                            STARTUP_RUN_VALUE_NAME,
+                            0,
+                            winreg.REG_SZ,
+                            self.startup_command,
+                        )
+                    else:
+                        try:
+                            winreg.DeleteValue(key, STARTUP_RUN_VALUE_NAME)
+                        except FileNotFoundError:
+                            # Missing value already means "do not start with
+                            # Windows"; this is not a fallback to another
+                            # launch method, just an idempotent removal.
+                            pass
+            except OSError as exc:
+                QMessageBox.critical(
+                    self.window,
+                    "Unable to save startup setting",
+                    "Settings were saved to config.json, but Windows startup "
+                    "could not be updated at:\n"
+                    f"HKCU\\{STARTUP_RUN_REGISTRY_PATH}\\{STARTUP_RUN_VALUE_NAME}"
+                    f"\n\n{type(exc).__name__}: {exc}",
+                )
+                logger.exception("Config editor failed to save Windows startup setting.")
+                return
 
         logger.info("Config editor saved config: %s", self.config_path)
         QMessageBox.information(
