@@ -24,41 +24,21 @@ class ConfigEditorWindow:
     # code. It edits config.json only; current listening sessions keep their
     # already-loaded settings until the app is restarted.
     def __init__(self, config_path: Path):
-        from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (
             QCheckBox,
             QComboBox,
             QDoubleSpinBox,
-            QFileDialog,
             QFormLayout,
             QHBoxLayout,
             QLabel,
             QLineEdit,
             QMainWindow,
-            QMessageBox,
             QPushButton,
             QSpinBox,
             QVBoxLayout,
             QWidget,
         )
 
-        self._qt = {
-            "Qt": Qt,
-            "QCheckBox": QCheckBox,
-            "QComboBox": QComboBox,
-            "QDoubleSpinBox": QDoubleSpinBox,
-            "QFileDialog": QFileDialog,
-            "QFormLayout": QFormLayout,
-            "QHBoxLayout": QHBoxLayout,
-            "QLabel": QLabel,
-            "QLineEdit": QLineEdit,
-            "QMainWindow": QMainWindow,
-            "QMessageBox": QMessageBox,
-            "QPushButton": QPushButton,
-            "QSpinBox": QSpinBox,
-            "QVBoxLayout": QVBoxLayout,
-            "QWidget": QWidget,
-        }
         self.config_path = config_path
         self.config_data = self._read_config()
         self.window = QMainWindow()
@@ -147,7 +127,8 @@ class ConfigEditorWindow:
         self.window.activateWindow()
 
     def _read_config(self) -> dict:
-        QMessageBox = self._qt["QMessageBox"]
+        from PySide6.QtWidgets import QMessageBox
+
         if not self.config_path.exists():
             return {}
         try:
@@ -171,7 +152,8 @@ class ConfigEditorWindow:
         return config_data
 
     def _populate_devices(self) -> None:
-        QMessageBox = self._qt["QMessageBox"]
+        from PySide6.QtWidgets import QMessageBox
+
         try:
             devices = sd.query_devices()
         except Exception as exc:
@@ -242,7 +224,8 @@ class ConfigEditorWindow:
             self.indicator_position_combo.setCurrentIndex(index)
 
     def _choose_credentials_file(self) -> None:
-        QFileDialog = self._qt["QFileDialog"]
+        from PySide6.QtWidgets import QFileDialog
+
         selected_path, _ = QFileDialog.getOpenFileName(
             self.window,
             "Select Google credentials JSON",
@@ -253,12 +236,17 @@ class ConfigEditorWindow:
             self.credentials_edit.setText(selected_path)
 
     def _save_config(self) -> None:
-        QMessageBox = self._qt["QMessageBox"]
+        from PySide6.QtWidgets import QMessageBox
+
         self.config_data["credentials"] = self.credentials_edit.text().strip()
         self.config_data["device"] = self.device_combo.currentData()
         self.config_data["language"] = self.language_edit.text().strip() or DEFAULT_LANGUAGE
         self.config_data["rate"] = int(self.rate_spin.value())
         self.config_data["pasteFinal"] = self.paste_final_check.isChecked()
+        # Tray and hotkey are operational launch-mode settings. The first
+        # settings window focuses on daily dictation preferences, so it
+        # preserves these existing values instead of exposing controls that
+        # could accidentally hide the tray or disable the configured shortcut.
         self.config_data["tray"] = bool(self.config_data.get("tray", True))
         self.config_data["hotkey"] = bool(self.config_data.get("hotkey", True))
         self.config_data["commandWords"] = self.command_words_check.isChecked()

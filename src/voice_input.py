@@ -23,6 +23,9 @@ from app_config import (
     DictationSettings,
     FeedbackSettings,
 )
+# error_dialog is intentionally imported at startup rather than inside each
+# error branch. It is a tiny Win32 wrapper, and windowed builds need it ready
+# before config, logging, PySide6, or tray startup can fail silently.
 from error_dialog import show_error_message
 from global_hotkey import HOTKEY_DISPLAY_NAME
 from hotkey_app import HotkeyDictationApp
@@ -81,7 +84,7 @@ def main() -> int:
     parser.add_argument(
         "--settings",
         action="store_true",
-        help="Open the config editor and exit.",
+        help="Open the config editor, wait until it closes, then exit.",
     )
     parser.add_argument(
         "--paste-final",

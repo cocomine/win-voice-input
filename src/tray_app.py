@@ -1,6 +1,5 @@
 import logging
 import os
-import subprocess
 import sys
 import threading
 import winreg
@@ -41,6 +40,7 @@ class TrayDictationApp:
         "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
     )
     SYSTEM_LIGHT_THEME_VALUE = "SystemUsesLightTheme"
+    SOURCE_ENTRY_POINT_FILE_NAME = "voice_input.py"
 
     def __init__(
         self,
@@ -192,6 +192,8 @@ class TrayDictationApp:
         icon: pystray.Icon,
         item: pystray.MenuItem,
     ) -> None:
+        import subprocess
+
         # The settings editor runs in a separate process because Qt owns its own
         # event loop. Keeping it out of the pystray process avoids UI-loop
         # contention while dictation and tray hotkeys keep running.
@@ -203,9 +205,12 @@ class TrayDictationApp:
                 str(self.config_path),
             ]
         else:
+            source_entry_point = (
+                Path(__file__).resolve().parent / self.SOURCE_ENTRY_POINT_FILE_NAME
+            )
             command = [
                 sys.executable,
-                str(Path(__file__).resolve().parent / "voice_input.py"),
+                str(source_entry_point),
                 "--settings",
                 "--config",
                 str(self.config_path),
