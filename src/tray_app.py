@@ -208,7 +208,9 @@ class TrayDictationApp:
             # user exactly which project files must be checked.
             raise RuntimeError(
                 f"Required tray icon SVG is missing or inaccessible: {svg_path}. "
-                "Ensure mic.svg and mic-mute.svg are in the assets folder."
+                "Source runs expect assets\\mic.svg and assets\\mic-mute.svg "
+                "under the project root; packaged runs expect the same assets "
+                "folder bundled under PyInstaller's internal data directory."
             ) from exc
         drawing = svg2rlg(BytesIO(svg_text.encode("utf-8")))
         if drawing is None:

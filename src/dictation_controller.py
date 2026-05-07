@@ -169,7 +169,9 @@ class DictationController:
         if not asset_path.is_file():
             raise RuntimeError(
                 f"Required status sound is missing: {asset_path}. "
-                "Ensure start.mp3 and end.mp3 are in the assets folder."
+                "Source runs expect assets\\start.mp3 and assets\\end.mp3 "
+                "under the project root; packaged runs expect the same assets "
+                "folder bundled under PyInstaller's internal data directory."
             )
         return asset_path
 
