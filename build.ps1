@@ -3,6 +3,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$env:PYGAME_HIDE_SUPPORT_PROMPT = "1"
 
 # Build always runs from the project folder so PyInstaller can resolve source
 # files and bundled tray SVG assets in a predictable way, no matter which folder
@@ -16,13 +17,14 @@ if (-not (Test-Path -LiteralPath $pythonExe)) {
     exit 1
 }
 
-$requiredAssets = @("mic.svg", "mic-mute.svg")
+$requiredAssets = @("mic.svg", "mic-mute.svg", "start.mp3", "end.mp3")
 foreach ($asset in $requiredAssets) {
-    # These SVGs are required at runtime because tray_app.py renders the tray
-    # icon from them. The build stops early if they are missing so the packaged
-    # exe cannot be created with broken status icons.
+    # These files are required at runtime because tray_app.py renders the tray
+    # icon from SVGs and dictation_controller.py plays MP3 state cues. The build
+    # stops early if they are missing so the packaged exe cannot be created with
+    # broken status feedback.
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $asset))) {
-        Write-Host "Missing required tray icon asset: $asset"
+        Write-Host "Missing required app asset: $asset"
         exit 1
     }
 }
@@ -44,6 +46,8 @@ $pyInstallerArgs = @(
     "--name", "WinVoiceInput",
     "--add-data", "mic.svg;.",
     "--add-data", "mic-mute.svg;.",
+    "--add-data", "start.mp3;.",
+    "--add-data", "end.mp3;.",
     "--hidden-import", "pystray._win32",
     "--collect-submodules", "google.cloud.speech_v1",
     "--collect-submodules", "google.api_core",

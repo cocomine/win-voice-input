@@ -4,3 +4,4 @@ pystray>=0.19.5
 Pillow>=10.4.0
 svglib>=1.5.1
 reportlab>=4.2.2
+pygame>=2.6.1

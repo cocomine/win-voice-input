@@ -18,11 +18,12 @@ class TrayDictationApp:
     # microphone, Google STT, or paste logic; it only exposes Start/Pause/Exit
     # controls and mirrors controller status into the icon and menu.
     ICON_SIZE = 64
-    # These colors are part of the user-visible tray status language: green
-    # means microphone input is being streamed, gray means no listening session
-    # is active.
+    # These colors are part of the user-visible tray status language. White is
+    # the requested muted color; it can have lower contrast on light Windows
+    # tray backgrounds, so the hover title and start/end sounds remain parallel
+    # status cues instead of relying on color alone.
     LISTENING_ICON_COLOR = "#20AA55"
-    MUTED_ICON_COLOR = "#808080"
+    MUTED_ICON_COLOR = "#FFFFFF"
 
     def __init__(
         self,

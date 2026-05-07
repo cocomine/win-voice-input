@@ -1,10 +1,20 @@
+import os
 import sys
 import threading
 from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from app_config import AudioSettings, DictationSettings
 from dictation_session import listen
 
+if TYPE_CHECKING:
+    import pygame
+
+# pygame reads this environment variable during import. Setting it at module
+# load time keeps constructor calls free of hidden global-state changes and
+# prevents the pygame greeting from appearing in normal CLI/build output.
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 StatusCallback = Callable[[str], None]
 
@@ -26,6 +36,36 @@ class DictationController:
         self.dictation_settings = dictation_settings
         self.on_status_change = on_status_change
         self.status = "Idle"
+        asset_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        # Status sounds are required user-facing cues. They are resolved during
+        # controller setup so a missing packaged asset fails before the user
+        # starts dictation and wonders why no state sound is played.
+        self._start_sound_path = self._resolve_required_asset(asset_dir, "start.mp3")
+        self._end_sound_path = self._resolve_required_asset(asset_dir, "end.mp3")
+        # pygame is imported only when a controller is created. Diagnostic CLI
+        # paths such as --help and --list-devices therefore stay lightweight,
+        # while real dictation modes fail early if the required audio playback
+        # dependency is not installed.
+        try:
+            import pygame
+        except ImportError as exc:
+            raise RuntimeError(
+                "pygame is required for start/end status sounds. "
+                "Install runtime dependencies from requirements.txt."
+            ) from exc
+
+        self._mixer = pygame.mixer
+        self._sound_error = pygame.error
+        try:
+            if self._mixer.get_init() is None:
+                self._mixer.init()
+            self._start_sound = self._mixer.Sound(str(self._start_sound_path))
+            self._end_sound = self._mixer.Sound(str(self._end_sound_path))
+        except pygame.error as exc:
+            raise RuntimeError(
+                "Failed to initialize or load start.mp3/end.mp3 status sounds."
+            ) from exc
+
         self._lock = threading.Lock()
         self._stop_event: threading.Event | None = None
         self._worker: threading.Thread | None = None
@@ -89,6 +129,42 @@ class DictationController:
             self._set_status("Idle")
 
     def _set_status(self, status: str) -> None:
+        previous_status = self.status
         self.status = status
         if self.on_status_change is not None:
             self.on_status_change(status)
+
+        # The cues are tied to actual lifecycle transitions, not button clicks.
+        # That makes hotkey starts, tray starts, manual pauses, and idle-timeout
+        # auto-stops all use the same audible status language.
+        if status == "Listening":
+            self._play_status_sound(self._start_sound)
+        elif previous_status == "Listening" and status != "Listening":
+            self._play_status_sound(self._end_sound)
+
+    def _resolve_required_asset(self, asset_dir: Path, file_name: str) -> Path:
+        asset_path = asset_dir / file_name
+        if not asset_path.is_file():
+            raise RuntimeError(
+                f"Required status sound is missing: {asset_path}. "
+                "Ensure start.mp3 and end.mp3 are in the project folder."
+            )
+        return asset_path
+
+    def _play_status_sound(self, sound: "pygame.mixer.Sound") -> None:
+        # Sound.play() is asynchronous, so the UI and microphone control do not
+        # wait for the cue to finish. Playback is a user cue, not the dictation
+        # state machine itself, so a temporary audio-channel issue is reported
+        # without stopping microphone control or Google STT.
+        try:
+            channel = sound.play()
+        except self._sound_error as exc:
+            print(f"\nStatus sound warning: {exc}", file=sys.stderr, flush=True)
+            return
+
+        if channel is None:
+            print(
+                "\nStatus sound warning: no audio channel available.",
+                file=sys.stderr,
+                flush=True,
+            )
