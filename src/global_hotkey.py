@@ -6,13 +6,13 @@ from win32_message_types import MSG
 
 
 HOTKEY_ID_TOGGLE_LISTENING = 1
-# Ctrl+Alt+V was chosen for the current tray workflow because it is close to
-# Windows paste muscle memory while the extra Alt modifier prevents the app from
-# intercepting normal Ctrl+V paste operations in the active application.
-HOTKEY_DISPLAY_NAME = "Ctrl+Alt+V"
+# Ctrl+Alt+Space is used as the single start/pause shortcut because it is the
+# original workflow shortcut for this app and avoids sitting beside normal
+# Ctrl+V paste muscle memory while dictating into active Windows applications.
+HOTKEY_DISPLAY_NAME = "Ctrl+Alt+Space"
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
-VK_V = 0x56
+VK_SPACE = 0x20
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
 
@@ -71,7 +71,7 @@ class GlobalHotkeyListener:
                 None,
                 HOTKEY_ID_TOGGLE_LISTENING,
                 MOD_CONTROL | MOD_ALT,
-                VK_V,
+                VK_SPACE,
             ):
                 raise ctypes.WinError()
             hotkey_registered = True

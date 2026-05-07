@@ -41,6 +41,11 @@ class TrayDictationApp:
     )
     SYSTEM_LIGHT_THEME_VALUE = "SystemUsesLightTheme"
     SOURCE_ENTRY_POINT_FILE_NAME = "voice_input.py"
+    STARTUP_NOTIFICATION_TITLE = "Win Voice Input"
+    STARTUP_NOTIFICATION_MESSAGE = (
+        f"App is running. Press {HOTKEY_DISPLAY_NAME} or use the tray menu "
+        "to start voice input."
+    )
 
     def __init__(
         self,
@@ -167,6 +172,22 @@ class TrayDictationApp:
             daemon=True,
         )
         self._hotkey_thread.start()
+
+        # Windowed builds intentionally stay in the background after startup.
+        # A tray notification confirms that the app is ready and tells the user
+        # which control starts dictation, without blocking the tray UI loop.
+        try:
+            icon.notify(
+                self.STARTUP_NOTIFICATION_MESSAGE,
+                self.STARTUP_NOTIFICATION_TITLE,
+            )
+            logger.info("Startup notification shown.")
+        except Exception as exc:
+            logger.exception("Failed to show startup notification.")
+            show_error_message(
+                "Win Voice Input Notification Error",
+                f"Unable to show startup notification:\n\n{exc}",
+            )
 
     def _run_hotkey_listener(self) -> None:
         try:
