@@ -12,6 +12,7 @@ from svglib.svglib import svg2rlg
 from app_config import AudioSettings, DictationSettings
 from dictation_controller import DictationController
 from global_hotkey import GlobalHotkeyListener
+from listening_indicator import ListeningIndicator
 
 
 class TrayDictationApp:
@@ -43,6 +44,7 @@ class TrayDictationApp:
             self._on_status_change,
         )
         self.hotkey_listener = GlobalHotkeyListener()
+        self.listening_indicator = ListeningIndicator()
         self.icon: pystray.Icon | None = None
         self._hotkey_thread: threading.Thread | None = None
         # PyInstaller unpacks bundled data files into sys._MEIPASS. Source runs
@@ -158,11 +160,17 @@ class TrayDictationApp:
 
     def _on_exit(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         self.controller.shutdown()
+        self.listening_indicator.shutdown()
         self.hotkey_listener.stop()
         icon.stop()
 
     def _on_status_change(self, status: str) -> None:
         print(f"Status: {status}")
+        if status == "Listening":
+            self.listening_indicator.show()
+        else:
+            self.listening_indicator.hide()
+
         if self.icon is None:
             return
 

@@ -9,6 +9,7 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Prints interim and final transcripts in the terminal.
 - Pastes final transcripts into the active Windows app.
 - Shows a system tray icon with Idle / Listening / Stopping status.
+- Shows a small listening indicator near the active text caret while listening.
 - Uses `mic.svg` in green while listening, and automatically recolors `mic-mute.svg` for Windows light or dark system UI while not listening.
 - Plays `start.mp3` when listening begins and `end.mp3` when listening stops.
 - Uses `Ctrl+Alt+Space` or the tray menu to start or pause listening.
@@ -51,6 +52,7 @@ This workspace already has a local `.venv` with the dependencies installed, so y
 - `global_hotkey.py` - global `Ctrl+Alt+Space` Win32 hotkey listener.
 - `hotkey_app.py` - global `Ctrl+Alt+Space` start/pause control.
 - `tray_app.py` - system tray icon, status display, and tray menu.
+- `listening_indicator.py` - floating listening indicator near the active Windows caret.
 - `text_processing.py` - optional command-word conversion and duplicate filtering.
 - `config.example.json` - optional local settings template.
 - `mic.svg`, `mic-mute.svg`, `start.mp3`, `end.mp3` - required tray/status assets.
@@ -118,6 +120,9 @@ On startup, the console prints the input device it will use. If no device is con
 While paused, the app does not record microphone audio and does not send audio to Google.
 
 If Google Speech-to-Text does not return any recognized text for 5 seconds, the current listening session stops automatically and returns to idle.
+
+While listening, a small blue microphone indicator follows the active Windows
+text caret when the focused app exposes a system caret location.
 
 Use a specific microphone:
 
