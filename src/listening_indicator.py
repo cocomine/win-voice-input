@@ -14,6 +14,7 @@ from svglib.svglib import svg2rlg
 from app_config import (
     ALLOWED_LISTENING_INDICATOR_POSITIONS,
     DEFAULT_LISTENING_INDICATOR_POSITION,
+    get_asset_dir,
 )
 from win32_message_types import MSG, POINT
 
@@ -195,18 +196,7 @@ class ListeningIndicator:
         self._class_name = f"{self.CLASS_NAME}{id(self)}"
         self._window_procedure = WindowProcedure(self._handle_window_message)
 
-        if getattr(sys, "_MEIPASS", None):
-            self._asset_dir = Path(sys._MEIPASS)
-        else:
-            module_file = globals().get("__file__")
-            # Some embedded execution contexts do not provide __file__. In that
-            # case, the current working directory is the only explicit project
-            # location available, and missing assets still raise clear errors.
-            self._asset_dir = (
-                Path(module_file).resolve().parent
-                if module_file is not None
-                else Path.cwd()
-            )
+        self._asset_dir = get_asset_dir()
 
         font_override = os.environ.get(self.FONT_ENV_VAR)
         if font_override:
@@ -237,7 +227,7 @@ class ListeningIndicator:
         except OSError as exc:
             raise RuntimeError(
                 f"Required listening indicator SVG is missing or inaccessible: "
-                f"{mic_svg_path}. Ensure mic.svg exists beside the source file "
+                f"{mic_svg_path}. Ensure mic.svg exists in the assets folder "
                 "during development and is bundled by build.ps1 for packaged "
                 "runs."
             ) from exc

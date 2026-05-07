@@ -9,7 +9,12 @@ from PIL import Image
 from reportlab.graphics import renderPM
 from svglib.svglib import svg2rlg
 
-from app_config import AudioSettings, DictationSettings, FeedbackSettings
+from app_config import (
+    AudioSettings,
+    DictationSettings,
+    FeedbackSettings,
+    get_asset_dir,
+)
 from dictation_controller import DictationController
 from global_hotkey import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
 from listening_indicator import ListeningIndicator
@@ -53,10 +58,9 @@ class TrayDictationApp:
         )
         self.icon: pystray.Icon | None = None
         self._hotkey_thread: threading.Thread | None = None
-        # PyInstaller unpacks bundled data files into sys._MEIPASS. Source runs
-        # keep the SVG files next to this module. This chooses the correct asset
-        # directory for both modes without changing which SVG files are required.
-        asset_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        # Tray artwork is loaded from the shared assets folder so source runs
+        # and packaged runs use the same required SVG files.
+        asset_dir = get_asset_dir()
         try:
             with winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
@@ -204,7 +208,7 @@ class TrayDictationApp:
             # user exactly which project files must be checked.
             raise RuntimeError(
                 f"Required tray icon SVG is missing or inaccessible: {svg_path}. "
-                "Ensure mic.svg and mic-mute.svg are in the project folder."
+                "Ensure mic.svg and mic-mute.svg are in the assets folder."
             ) from exc
         drawing = svg2rlg(BytesIO(svg_text.encode("utf-8")))
         if drawing is None:

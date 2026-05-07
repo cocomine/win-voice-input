@@ -1,4 +1,6 @@
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 
 # Shared defaults live in one file so CLI, PowerShell wrappers, and tests do
@@ -11,6 +13,7 @@ DEFAULT_IDLE_TIMEOUT_SECONDS = 5.0
 DEFAULT_PLAY_STATUS_SOUNDS = True
 DEFAULT_SHOW_LISTENING_INDICATOR = True
 DEFAULT_LISTENING_INDICATOR_POSITION = "bottom-center"
+ASSETS_DIR_NAME = "assets"
 ALLOWED_LISTENING_INDICATOR_POSITIONS = (
     "bottom-center",
     "bottom-left",
@@ -19,6 +22,16 @@ ALLOWED_LISTENING_INDICATOR_POSITIONS = (
     "top-left",
     "top-right",
 )
+
+
+def get_asset_dir() -> Path:
+    # Source runs keep assets in the project-level assets folder, while
+    # PyInstaller exposes bundled data under sys._MEIPASS. Centralizing this
+    # path rule keeps tray icons, status sounds, and the listening indicator in
+    # agreement after the folder restructure.
+    if getattr(sys, "_MEIPASS", None):
+        return Path(sys._MEIPASS) / ASSETS_DIR_NAME
+    return Path(__file__).resolve().parent.parent / ASSETS_DIR_NAME
 
 
 @dataclass(frozen=True)

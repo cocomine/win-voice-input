@@ -1,11 +1,15 @@
 import os
-import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app_config import AudioSettings, DictationSettings, FeedbackSettings
+from app_config import (
+    AudioSettings,
+    DictationSettings,
+    FeedbackSettings,
+    get_asset_dir,
+)
 from dictation_session import listen
 
 if TYPE_CHECKING:
@@ -42,7 +46,7 @@ class DictationController:
         self._start_sound: "pygame.mixer.Sound | None" = None
         self._end_sound: "pygame.mixer.Sound | None" = None
         if self.feedback_settings.play_status_sounds:
-            asset_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+            asset_dir = get_asset_dir()
             # Status sounds are required only when enabled. They are resolved
             # during controller setup so a missing packaged asset fails before
             # the user starts dictation and wonders why no state sound is played.
@@ -165,7 +169,7 @@ class DictationController:
         if not asset_path.is_file():
             raise RuntimeError(
                 f"Required status sound is missing: {asset_path}. "
-                "Ensure start.mp3 and end.mp3 are in the project folder."
+                "Ensure start.mp3 and end.mp3 are in the assets folder."
             )
         return asset_path
 

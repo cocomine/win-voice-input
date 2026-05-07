@@ -105,7 +105,7 @@ if (-not $env:GOOGLE_APPLICATION_CREDENTIALS) {
 # each item as one argument, which avoids quoting bugs in file paths and keeps
 # optional flags easy to review.
 $arguments = @(
-    ".\voice_input.py",
+    ".\src\voice_input.py",
     "--language", $settings.Language,
     "--rate", $settings.Rate,
     "--final-dedupe-seconds", $settings.FinalDedupeSeconds,

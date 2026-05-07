@@ -10,6 +10,7 @@ $env:PYGAME_HIDE_SUPPORT_PROMPT = "1"
 # folder PowerShell was opened from.
 Set-Location -LiteralPath $PSScriptRoot
 
+$assetDir = Join-Path $PSScriptRoot "assets"
 $pythonExe = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $pythonExe)) {
     Write-Host "Missing local Python environment: $pythonExe"
@@ -23,8 +24,8 @@ foreach ($asset in $requiredAssets) {
     # icon from SVGs and dictation_controller.py plays MP3 state cues. The build
     # stops early if they are missing so the packaged exe cannot be created with
     # broken status feedback.
-    if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $asset))) {
-        Write-Host "Missing required app asset: $asset"
+    if (-not (Test-Path -LiteralPath (Join-Path $assetDir $asset))) {
+        Write-Host "Missing required app asset: assets\$asset"
         exit 1
     }
 }
@@ -44,14 +45,11 @@ $pyInstallerArgs = @(
     "--clean",
     "--onedir",
     "--name", "WinVoiceInput",
-    "--add-data", "mic.svg;.",
-    "--add-data", "mic-mute.svg;.",
-    "--add-data", "start.mp3;.",
-    "--add-data", "end.mp3;.",
+    "--add-data", "assets;assets",
     "--hidden-import", "pystray._win32",
     "--collect-submodules", "google.cloud.speech_v1",
     "--collect-submodules", "google.api_core",
-    "voice_input.py"
+    "src\voice_input.py"
 )
 
 if ($Windowed) {

@@ -192,7 +192,9 @@ def main() -> int:
         if getattr(sys, "frozen", False):
             config_path = Path(sys.executable).resolve().parent / "config.json"
         else:
-            config_path = Path(__file__).resolve().parent / "config.json"
+            # Source code now lives in src/, while local config remains at the
+            # project root beside the PowerShell scripts and README.
+            config_path = Path(__file__).resolve().parent.parent / "config.json"
         config_was_explicit = False
     else:
         config_path = Path(args.config).resolve()

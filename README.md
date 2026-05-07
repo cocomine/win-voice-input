@@ -10,8 +10,8 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Pastes final transcripts into the active Windows app.
 - Shows a system tray icon with Idle / Listening / Stopping status.
 - Shows a small listening status window while listening.
-- Uses `mic.svg` in green while listening, and automatically recolors `mic-mute.svg` for Windows light or dark system UI while not listening.
-- Plays `start.mp3` when listening begins and `end.mp3` when listening stops.
+- Uses `assets\mic.svg` in green while listening, and automatically recolors `assets\mic-mute.svg` for Windows light or dark system UI while not listening.
+- Plays `assets\start.mp3` when listening begins and `assets\end.mp3` when listening stops.
 - Uses `Ctrl+Alt+V` or the tray menu to start or pause listening.
 - Stops the current listening session after 5 seconds without recognized text.
 - Voice commands are disabled by default, so recognized text is pasted as-is.
@@ -43,20 +43,11 @@ This workspace already has a local `.venv` with the dependencies installed, so y
 
 ## Project Layout
 
-- `voice_input.py` - command-line entry point and argument parsing.
-- `app_config.py` - shared defaults and settings objects.
-- `audio_capture.py` - microphone capture and audio chunk generator.
-- `dictation_session.py` - Google Speech-to-Text streaming session.
-- `windows_text_output.py` - Windows clipboard and keyboard paste integration.
-- `dictation_controller.py` - shared start/stop lifecycle for hotkey and tray UI.
-- `global_hotkey.py` - global `Ctrl+Alt+V` Win32 hotkey listener.
-- `hotkey_app.py` - global `Ctrl+Alt+V` start/pause control.
-- `tray_app.py` - system tray icon, status display, and tray menu.
-- `listening_indicator.py` - floating listening status window.
-- `text_processing.py` - optional command-word conversion and duplicate filtering.
+- `src\` - Python source files for dictation, tray UI, hotkey control, status window, and Windows text output.
+- `assets\` - required tray/status assets: `mic.svg`, `mic-mute.svg`, `start.mp3`, and `end.mp3`.
+- `run-dictation.ps1`, `list-devices.ps1`, `build.ps1` - root-level PowerShell scripts for daily use, microphone listing, and packaging.
 - `config.example.json` - optional local settings template.
-- `mic.svg`, `mic-mute.svg`, `start.mp3`, `end.mp3` - required tray/status assets.
-- `build.ps1` - PyInstaller build script for creating `WinVoiceInput.exe`.
+- `requirements.txt` - runtime dependency list.
 - `requirements-build.txt` - build-only dependency list.
 
 ## Run
@@ -75,7 +66,7 @@ Create `config.json` by copying `config.example.json`, then edit values you want
 Common `config.json` settings:
 
 - `idleTimeoutSeconds`: seconds without recognized text before listening stops. Use `0` to disable.
-- `playStatusSounds`: `true` plays `start.mp3` and `end.mp3`; `false` keeps state changes silent.
+- `playStatusSounds`: `true` plays `assets\start.mp3` and `assets\end.mp3`; `false` keeps state changes silent.
 - `showListeningIndicator`: `true` shows the floating listening status window; `false` hides it.
 - `listeningIndicatorPosition`: `bottom-center`, `bottom-left`, `bottom-right`, `top-center`, `top-left`, or `top-right`.
 

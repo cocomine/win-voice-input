@@ -1,1 +1,1 @@
-.\.venv\Scripts\python.exe .\voice_input.py --list-devices
+.\.venv\Scripts\python.exe .\src\voice_input.py --list-devices
