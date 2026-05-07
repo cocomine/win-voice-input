@@ -118,7 +118,7 @@ class ListeningIndicator:
     # reliable Windows caret position.
     WINDOW_WIDTH = 176
     WINDOW_HEIGHT = 56
-    WORK_AREA_EDGE_GAP_PX = 24
+    WORK_AREA_MARGIN_PX = 24
     TIMER_ID = 1
     # The status window is fixed near the taskbar, so 120ms is responsive
     # enough for start/stop visibility without unnecessary timer wakeups.
@@ -610,16 +610,16 @@ class ListeningIndicator:
         # which excludes the taskbar. This keeps the status window visible
         # without relying on browser/editor caret reporting.
         if self.position.endswith("left"):
-            x = work_area.left + self.WORK_AREA_EDGE_GAP_PX
+            x = work_area.left + self.WORK_AREA_MARGIN_PX
         elif self.position.endswith("right"):
-            x = work_area.right - self.WINDOW_WIDTH - self.WORK_AREA_EDGE_GAP_PX
+            x = work_area.right - self.WINDOW_WIDTH - self.WORK_AREA_MARGIN_PX
         else:
             x = work_area.left + ((work_width - self.WINDOW_WIDTH) // 2)
 
         if self.position.startswith("top"):
-            y = work_area.top + self.WORK_AREA_EDGE_GAP_PX
+            y = work_area.top + self.WORK_AREA_MARGIN_PX
         else:
-            y = work_area.bottom - self.WINDOW_HEIGHT - self.WORK_AREA_EDGE_GAP_PX
+            y = work_area.bottom - self.WINDOW_HEIGHT - self.WORK_AREA_MARGIN_PX
 
         self._show_layered_window(x, y)
 

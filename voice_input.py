@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import sounddevice as sd
@@ -20,9 +21,10 @@ from app_config import (
     DictationSettings,
     FeedbackSettings,
 )
-from dictation_session import listen
 from global_hotkey import HOTKEY_DISPLAY_NAME
 from hotkey_app import HotkeyDictationApp
+
+IMMEDIATE_MODE_STATUS_POLL_SECONDS = 0.1
 
 
 def main() -> int:
@@ -357,9 +359,49 @@ def main() -> int:
                 feedback_settings,
             ).run()
         else:
-            # Non-hotkey mode preserves the earlier prototype behavior: start a
-            # listening session immediately, useful for quick console tests.
-            listen(str(settings["language"]), audio_settings, dictation_settings)
+            # Non-hotkey mode still starts immediately, but it uses the same
+            # controller as tray/hotkey mode so config-driven feedback settings
+            # such as status sounds and the listening indicator stay consistent.
+            from dictation_controller import DictationController
+
+            listening_indicator = None
+            if feedback_settings.show_listening_indicator:
+                from listening_indicator import ListeningIndicator
+
+                listening_indicator = ListeningIndicator(
+                    feedback_settings.listening_indicator_position
+                )
+
+            def on_immediate_status_change(status: str) -> None:
+                # DictationController reports every lifecycle transition through
+                # this callback. Immediate mode has no tray menu to mirror that
+                # state, so the console and optional indicator are updated here.
+                print(f"Status: {status}")
+                if listening_indicator is None:
+                    return
+                if status == "Listening":
+                    listening_indicator.show()
+                else:
+                    listening_indicator.hide()
+
+            controller = DictationController(
+                str(settings["language"]),
+                audio_settings,
+                dictation_settings,
+                feedback_settings,
+                on_immediate_status_change,
+            )
+            try:
+                controller.start()
+                while controller.status != "Idle":
+                    # Immediate mode has no tray or hotkey event loop to block
+                    # on. A short named sleep keeps Ctrl+C responsive while the
+                    # worker thread owns microphone and Google streaming work.
+                    time.sleep(IMMEDIATE_MODE_STATUS_POLL_SECONDS)
+            finally:
+                controller.shutdown()
+                if listening_indicator is not None:
+                    listening_indicator.shutdown()
     except KeyboardInterrupt:
         print("\nStopped.")
         return 0
