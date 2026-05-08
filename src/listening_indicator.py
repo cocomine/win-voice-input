@@ -618,10 +618,10 @@ class ListeningIndicator:
         )
         if text_bbox[2] - text_bbox[0] > text_max_width:
             # The overlay is a status surface, not an editor. Long interim
-            # transcripts are ellipsized so the bubble, border, and text never
-            # overlap while recognition keeps updating. Binary search keeps the
-            # number of text measurements small even when Google returns a very
-            # long interim transcript.
+            # transcripts are ellipsized at the front so the newest recognized
+            # words remain visible. Binary search keeps the number of text
+            # measurements small even when Google returns a very long interim
+            # transcript.
             ellipsis = "..."
             original_text = display_text
             low = 0
@@ -634,7 +634,8 @@ class ListeningIndicator:
             )
             while low <= high:
                 midpoint = (low + high) // 2
-                candidate_text = f"{original_text[:midpoint]}{ellipsis}"
+                suffix = "" if midpoint == 0 else original_text[-midpoint:]
+                candidate_text = f"{ellipsis}{suffix}"
                 candidate_bbox = measure_draw.textbbox(
                     (0, 0),
                     candidate_text,
