@@ -2,6 +2,7 @@ import json
 import logging
 import stat
 import sys
+import subprocess
 import winreg
 from pathlib import Path
 
@@ -42,8 +43,6 @@ class ConfigEditorWindow:
             QVBoxLayout,
             QWidget,
         )
-
-        import subprocess
 
         self.config_path = config_path
         self.startup_registry_available = True
@@ -250,10 +249,10 @@ class ConfigEditorWindow:
                 winreg.HKEY_CURRENT_USER,
                 STARTUP_RUN_REGISTRY_PATH,
             ) as key:
-                startup_command = winreg.QueryValueEx(
+                startup_command_value, startup_command_type = winreg.QueryValueEx(
                     key,
                     STARTUP_RUN_VALUE_NAME,
-                )[0]
+                )
         except FileNotFoundError:
             startup_command = ""
         except OSError as exc:
@@ -274,6 +273,34 @@ class ConfigEditorWindow:
             )
             logger.exception("Config editor failed to read Windows startup setting.")
             return
+        else:
+            if (
+                startup_command_type not in (winreg.REG_SZ, winreg.REG_EXPAND_SZ)
+                or not isinstance(startup_command_value, str)
+            ):
+                # A Run value should be a command-line string. Disabling the
+                # checkbox avoids converting an unexpected registry value into
+                # a misleading checked/unchecked state.
+                from PySide6.QtWidgets import QMessageBox
+
+                self.startup_registry_available = False
+                self.start_with_windows_check.setEnabled(False)
+                QMessageBox.critical(
+                    self.window,
+                    "Invalid startup setting",
+                    "Windows startup setting has an unexpected value type:\n"
+                    f"HKCU\\{STARTUP_RUN_REGISTRY_PATH}\\{STARTUP_RUN_VALUE_NAME}"
+                    f"\n\nExpected REG_SZ or REG_EXPAND_SZ string, got "
+                    f"registry type {startup_command_type} and Python type "
+                    f"{type(startup_command_value).__name__}.",
+                )
+                logger.error(
+                    "Unexpected Windows startup registry value type: %r / %s",
+                    startup_command_type,
+                    type(startup_command_value).__name__,
+                )
+                return
+            startup_command = startup_command_value
 
         self.start_with_windows_check.setChecked(bool(startup_command))
 
@@ -411,6 +438,16 @@ class ConfigEditorWindow:
             return
 
         if self.startup_registry_available:
+            startup_operation = (
+                "set"
+                if self.start_with_windows_check.isChecked()
+                else "remove"
+            )
+            startup_operation_message = (
+                "set the Windows startup entry"
+                if startup_operation == "set"
+                else "remove the Windows startup entry"
+            )
             try:
                 with winreg.CreateKeyEx(
                     winreg.HKEY_CURRENT_USER,
@@ -443,11 +480,14 @@ class ConfigEditorWindow:
                     self.window,
                     "Unable to save startup setting",
                     "Settings were saved to config.json, but Windows startup "
-                    "could not be updated at:\n"
+                    f"could not {startup_operation_message} at:\n"
                     f"HKCU\\{STARTUP_RUN_REGISTRY_PATH}\\{STARTUP_RUN_VALUE_NAME}"
                     f"\n\n{type(exc).__name__}: {exc}",
                 )
-                logger.exception("Config editor failed to save Windows startup setting.")
+                logger.exception(
+                    "Config editor failed to %s Windows startup setting.",
+                    startup_operation,
+                )
                 return
 
         logger.info("Config editor saved config: %s", self.config_path)
