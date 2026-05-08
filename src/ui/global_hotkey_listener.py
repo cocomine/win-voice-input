@@ -2,7 +2,7 @@ import ctypes
 from collections.abc import Callable
 from ctypes import wintypes
 
-from win32_message_types import MSG
+from win32_types import MSG
 
 
 HOTKEY_ID_TOGGLE_LISTENING = 1

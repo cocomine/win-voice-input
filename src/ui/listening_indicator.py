@@ -14,107 +14,25 @@ from PIL import Image, ImageDraw, ImageFont
 from reportlab.graphics import renderPM
 from svglib.svglib import svg2rlg
 
-from app_config import (
+from config import (
     ALLOWED_LISTENING_INDICATOR_POSITIONS,
     DEFAULT_LISTENING_INDICATOR_POSITION,
     get_asset_dir,
 )
-from win32_message_types import MSG, POINT
-
-logger = logging.getLogger(__name__)
-
-LRESULT = wintypes.LPARAM
-UINT_PTR = wintypes.WPARAM
-
-
-class RECT(ctypes.Structure):
-    # SystemParametersInfoW fills this RECT with the desktop work area. The
-    # status window uses that rectangle to stay above the taskbar on any monitor
-    # layout that Windows reports as the current work area.
-    _fields_ = [
-        ("left", wintypes.LONG),
-        ("top", wintypes.LONG),
-        ("right", wintypes.LONG),
-        ("bottom", wintypes.LONG),
-    ]
-
-
-class SIZE(ctypes.Structure):
-    # UpdateLayeredWindow needs the bitmap size as a Win32 SIZE structure.
-    _fields_ = [("cx", wintypes.LONG), ("cy", wintypes.LONG)]
-
-
-class BITMAPINFOHEADER(ctypes.Structure):
-    # CreateDIBSection receives a BITMAPINFOHEADER describing a 32-bit top-down
-    # BGRA bitmap. Pillow renders RGBA and the code converts it before copying.
-    _fields_ = [
-        ("biSize", wintypes.DWORD),
-        ("biWidth", wintypes.LONG),
-        ("biHeight", wintypes.LONG),
-        ("biPlanes", wintypes.WORD),
-        ("biBitCount", wintypes.WORD),
-        ("biCompression", wintypes.DWORD),
-        ("biSizeImage", wintypes.DWORD),
-        ("biXPelsPerMeter", wintypes.LONG),
-        ("biYPelsPerMeter", wintypes.LONG),
-        ("biClrUsed", wintypes.DWORD),
-        ("biClrImportant", wintypes.DWORD),
-    ]
-
-
-class RGBQUAD(ctypes.Structure):
-    _fields_ = [
-        ("rgbBlue", ctypes.c_byte),
-        ("rgbGreen", ctypes.c_byte),
-        ("rgbRed", ctypes.c_byte),
-        ("rgbReserved", ctypes.c_byte),
-    ]
-
-
-class BITMAPINFO(ctypes.Structure):
-    _fields_ = [
-        ("bmiHeader", BITMAPINFOHEADER),
-        ("bmiColors", RGBQUAD * 1),
-    ]
-
-
-class BLENDFUNCTION(ctypes.Structure):
-    # AC_SRC_ALPHA tells UpdateLayeredWindow to use the bitmap's per-pixel alpha.
-    # This is what keeps the rounded panel and microphone icon smooth.
-    _fields_ = [
-        ("BlendOp", ctypes.c_byte),
-        ("BlendFlags", ctypes.c_byte),
-        ("SourceConstantAlpha", ctypes.c_byte),
-        ("AlphaFormat", ctypes.c_byte),
-    ]
-
-
-WindowProcedure = ctypes.WINFUNCTYPE(
+from win32_types import (
+    BITMAPINFO,
+    BLENDFUNCTION,
     LRESULT,
-    wintypes.HWND,
-    wintypes.UINT,
-    wintypes.WPARAM,
-    wintypes.LPARAM,
+    MSG,
+    POINT,
+    RECT,
+    SIZE,
+    UINT_PTR,
+    WNDCLASSEXW,
+    WindowProcedure,
 )
 
-
-class WNDCLASSEXW(ctypes.Structure):
-    # RegisterClassExW needs a WNDCLASSEXW definition before CreateWindowExW can
-    # create the listening status window.
-    _fields_ = [
-        ("cbSize", wintypes.UINT),
-        ("style", wintypes.UINT),
-        ("lpfnWndProc", WindowProcedure),
-        ("cbClsExtra", ctypes.c_int),
-        ("cbWndExtra", ctypes.c_int),
-        ("hInstance", wintypes.HANDLE),
-        ("hIcon", wintypes.HANDLE),
-        ("hCursor", wintypes.HANDLE),
-        ("hbrBackground", wintypes.HANDLE),
-        ("lpszMenuName", wintypes.LPCWSTR),
-        ("lpszClassName", wintypes.LPCWSTR),
-        ("hIconSm", wintypes.HANDLE),
-    ]
+logger = logging.getLogger(__name__)
 
 
 class ListeningIndicator:

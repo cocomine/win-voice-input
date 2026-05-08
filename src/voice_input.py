@@ -10,7 +10,7 @@ from pathlib import Path
 
 import sounddevice as sd
 
-from app_config import (
+from config import (
     ALLOWED_LISTENING_INDICATOR_POSITIONS,
     CONFIG_SAVED_RESTART_EXIT_CODE,
     DEFAULT_CHUNK_MS,
@@ -28,13 +28,13 @@ from app_config import (
 # error_dialog is intentionally imported at startup rather than inside each
 # error branch. It is a tiny Win32 wrapper, and windowed builds need it ready
 # before config, logging, PySide6, or tray startup can fail silently.
-from error_dialog import (
+from ui.error_dialog import (
     MESSAGE_BOX_RESULT_YES,
     MESSAGE_BOX_YES_NO,
     show_error_message,
 )
-from global_hotkey import HOTKEY_DISPLAY_NAME
-from hotkey_app import HotkeyDictationApp
+from ui.global_hotkey_listener import HOTKEY_DISPLAY_NAME
+from ui.hotkey_dictation_app import HotkeyDictationApp
 
 IMMEDIATE_MODE_STATUS_POLL_SECONDS = 0.1
 LOG_FOLDER_NAME = "WinVoiceInput"
@@ -272,7 +272,7 @@ def main() -> int:
 
     if args.settings:
         try:
-            from config_editor import run_config_editor
+            from ui.config_editor_window import run_config_editor
 
             return run_config_editor(config_path)
         except Exception as exc:
@@ -313,7 +313,7 @@ def main() -> int:
             return 1
 
         try:
-            from config_editor import run_config_editor
+            from ui.config_editor_window import run_config_editor
 
             settings_result = run_config_editor(config_path)
             # The settings editor is a recovery path for startup setup errors.
@@ -588,7 +588,7 @@ def main() -> int:
             # Tray mode owns its own UI loop and also starts a background global
             # hotkey listener. Importing here keeps non-tray commands usable
             # without loading tray-only dependencies.
-            from tray_app import TrayDictationApp
+            from ui.tray_dictation_app import TrayDictationApp
 
             TrayDictationApp(
                 str(settings["language"]),
@@ -614,11 +614,11 @@ def main() -> int:
             # Non-hotkey mode still starts immediately, but it uses the same
             # controller as tray/hotkey mode so config-driven feedback settings
             # such as status sounds and the listening indicator stay consistent.
-            from dictation_controller import DictationController
+            from dictation.dictation_controller import DictationController
 
             listening_indicator = None
             if feedback_settings.show_listening_indicator:
-                from listening_indicator import ListeningIndicator
+                from ui.listening_indicator import ListeningIndicator
 
                 listening_indicator = ListeningIndicator(
                     feedback_settings.listening_indicator_position

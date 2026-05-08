@@ -1,9 +1,9 @@
 import logging
 
-from app_config import AudioSettings, DictationSettings, FeedbackSettings
-from dictation_controller import DictationController
-from global_hotkey import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
-from listening_indicator import ListeningIndicator
+from config import AudioSettings, DictationSettings, FeedbackSettings
+from dictation.dictation_controller import DictationController
+from ui.global_hotkey_listener import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
+from ui.listening_indicator import ListeningIndicator
 
 logger = logging.getLogger(__name__)
 
