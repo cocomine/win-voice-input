@@ -128,8 +128,8 @@ class ConfigEditorWindow:
         form.addRow("", self.start_with_windows_check)
 
         note = QLabel(
-            "Changes are saved to config.json. Saving restarts Win Voice Input "
-            "so the new settings are loaded."
+            "Changes are saved to config.json. Tray and startup setup launches "
+            "restart Win Voice Input automatically after Save."
         )
         note.setWordWrap(True)
         root_layout.addWidget(note)
@@ -504,7 +504,8 @@ class ConfigEditorWindow:
         QMessageBox.information(
             self.window,
             "Settings saved",
-            "Settings saved. Win Voice Input will restart now.",
+            "Settings saved. Win Voice Input will restart automatically when "
+            "this editor was opened from the tray app or startup setup prompt.",
         )
         # The editor process exits with a dedicated code after a successful
         # save. Tray mode watches for that code and restarts the main process;

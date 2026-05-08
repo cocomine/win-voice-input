@@ -1,6 +1,5 @@
 import logging
 import os
-import subprocess
 import sys
 import threading
 import winreg
@@ -72,6 +71,7 @@ class TrayDictationApp:
         self.icon: pystray.Icon | None = None
         self._hotkey_thread: threading.Thread | None = None
         self._restart_command: list[str] | None = None
+        self._restart_lock = threading.Lock()
         # Tray artwork is loaded from the shared assets folder so source runs
         # and packaged runs use the same required SVG files.
         asset_dir = get_asset_dir()
@@ -156,12 +156,19 @@ class TrayDictationApp:
         )
         logger.info("Tray icon started.")
         self.icon.run(setup=self._on_setup)
-        if self._restart_command is not None:
-            # Restart is delayed until pystray has stopped and runtime resources
-            # have been released. This prevents the new process from racing the
-            # old one for the global hotkey or listening indicator window.
+        with self._restart_lock:
+            restart_command = self._restart_command
+        if restart_command is not None:
+            # The watcher thread only asks pystray to stop. Runtime cleanup is
+            # done here on the tray main thread so controller, hotkey, and
+            # indicator state are not mutated from two threads at once.
+            self._shutdown_runtime()
+            # subprocess is imported only for the restart path so normal tray
+            # startup keeps module-level imports focused on always-used pieces.
+            import subprocess
+
             try:
-                subprocess.Popen(self._restart_command)
+                subprocess.Popen(restart_command)
                 logger.info("Restarted Win Voice Input after settings save.")
             except OSError as exc:
                 logger.exception("Failed to restart after settings save.")
@@ -257,6 +264,8 @@ class TrayDictationApp:
         icon: pystray.Icon,
         item: pystray.MenuItem,
     ) -> None:
+        import subprocess
+
         # The settings editor runs in a separate process because Qt owns its own
         # event loop. Keeping it out of the pystray process avoids UI-loop
         # contention while dictation and tray hotkeys keep running.
@@ -283,14 +292,16 @@ class TrayDictationApp:
                 return
 
             logger.info("Settings save requested app restart.")
-            self._restart_command = self._build_app_command(settings_mode=False)
-            self._shutdown_runtime()
+            with self._restart_lock:
+                self._restart_command = self._build_app_command(settings_mode=False)
             if self.icon is not None:
                 self.icon.stop()
 
         # Waiting in a background thread keeps the tray menu responsive while
         # the user edits settings. The child process exit code is the explicit
-        # signal that config.json was saved and the app should restart.
+        # signal that config.json was saved; this thread records the restart
+        # request and stops pystray, while main-thread cleanup happens after
+        # icon.run() returns.
         threading.Thread(
             target=wait_for_settings_close,
             daemon=True,

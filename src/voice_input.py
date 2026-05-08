@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import stat
-import subprocess
 import sys
 import time
 from logging.handlers import RotatingFileHandler
@@ -339,6 +338,8 @@ def main() -> int:
                         "--config",
                         str(config_path),
                     ]
+                import subprocess
+
                 try:
                     subprocess.Popen(restart_command)
                     logging.info(
