@@ -1,6 +1,5 @@
 import ctypes
 import logging
-import math
 import os
 import sys
 import threading
@@ -8,6 +7,7 @@ import time
 import traceback
 from io import BytesIO
 from ctypes import wintypes
+from math import cos, tau
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -141,6 +141,10 @@ class ListeningIndicator:
     ANIMATION_FRAME_INTERVAL_MS = 16
     ANIMATION_OFFSET_PX = 18
     HALO_PULSE_DURATION_MS = 1000
+    # One second at a 16ms timer cadence is about 60 frames. Pre-rendering this
+    # many halo frames keeps the pulse smooth while avoiding per-frame Pillow
+    # drawing, resizing, and BGRA conversion during normal listening.
+    HALO_FRAME_COUNT = 60
 
     # Pillow draws the status artwork at a higher resolution and downsamples it
     # before Windows displays it as a layered bitmap. mic.svg is used for the
@@ -209,7 +213,10 @@ class ListeningIndicator:
         self._thread_id: int | None = None
         self._memory_dc: int | None = None
         self._bitmap: int | None = None
-        self._bitmap_bits: int | None = None
+        # CreateDIBSection returns a raw memory address. Keeping the pointer
+        # lets the timer copy pre-rendered BGRA frames into the same bitmap
+        # instead of allocating GDI resources for every halo pulse frame.
+        self._bitmap_bits_ptr: int | None = None
         self._old_bitmap: int | None = None
         # Animation is tracked as a small state machine. _visible_fraction is
         # the current rendered progress where 0 means fully hidden and 1 means
@@ -229,6 +236,7 @@ class ListeningIndicator:
         self._status_font: ImageFont.FreeTypeFont
         self._status_base_image: Image.Image | None = None
         self._status_foreground_image: Image.Image | None = None
+        self._halo_bitmap_frames: list[bytes] | None = None
         self._class_name = f"{self.CLASS_NAME}{id(self)}"
         self._window_procedure = WindowProcedure(self._handle_window_message)
 
@@ -530,6 +538,13 @@ class ListeningIndicator:
         self._timer_interval_ms = interval_ms
 
     def _render_status_image(self, halo_fraction: float) -> Image.Image:
+        """Render one status image.
+
+        halo_fraction is expected to be in the 0.0 to 1.0 range, where 0.0
+        means the halo uses its minimum radius and 1.0 means maximum radius.
+        The caller owns time-based easing so this method only maps the provided
+        fraction into a concrete frame.
+        """
         scale = self.RENDER_SCALE
         width = self.WINDOW_WIDTH * scale
         height = self.WINDOW_HEIGHT * scale
@@ -613,8 +628,19 @@ class ListeningIndicator:
         )
 
     def _create_status_bitmap(self) -> None:
-        image = self._render_status_image(0.0).convert("RGBA")
-        bitmap_bytes = self._to_premultiplied_bgra(image)
+        self._halo_bitmap_frames = []
+        for frame_index in range(self.HALO_FRAME_COUNT):
+            halo_phase = frame_index / self.HALO_FRAME_COUNT
+            # cos() normally produces -1..1. This expression normalizes one
+            # full tau cycle to a 0..1..0 radius curve, giving the halo a smooth
+            # expand-and-shrink pulse without changing its color or opacity.
+            halo_fraction = 0.5 - (cos(halo_phase * tau) * 0.5)
+            self._halo_bitmap_frames.append(
+                self._to_premultiplied_bgra(
+                    self._render_status_image(halo_fraction).convert("RGBA")
+                )
+            )
+        bitmap_bytes = self._halo_bitmap_frames[0]
 
         bitmap_info = BITMAPINFO()
         bitmap_info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
@@ -638,8 +664,8 @@ class ListeningIndicator:
         if not self._bitmap or not bits.value:
             raise ctypes.WinError()
 
-        self._bitmap_bits = bits.value
-        ctypes.memmove(self._bitmap_bits, bitmap_bytes, len(bitmap_bytes))
+        self._bitmap_bits_ptr = bits.value
+        ctypes.memmove(self._bitmap_bits_ptr, bitmap_bytes, len(bitmap_bytes))
         self._memory_dc = self._gdi32.CreateCompatibleDC(None)
         if not self._memory_dc:
             raise ctypes.WinError()
@@ -654,7 +680,8 @@ class ListeningIndicator:
             self._gdi32.DeleteDC(self._memory_dc)
         self._memory_dc = None
         self._bitmap = None
-        self._bitmap_bits = None
+        self._bitmap_bits_ptr = None
+        self._halo_bitmap_frames = None
         self._old_bitmap = None
 
     def _to_premultiplied_bgra(self, image: Image.Image) -> bytes:
@@ -689,7 +716,6 @@ class ListeningIndicator:
             self._animation_start_time_ms = now_ms
             self._animation_start_fraction = self._visible_fraction
             self._animation_target_fraction = desired_fraction
-            self._set_timer_interval(self.ANIMATION_FRAME_INTERVAL_MS)
 
         if self._animation_start_time_ms is not None:
             elapsed_ms = now_ms - self._animation_start_time_ms
@@ -707,14 +733,20 @@ class ListeningIndicator:
             if progress >= 1.0:
                 self._visible_fraction = self._animation_target_fraction
                 self._animation_start_time_ms = None
-                if self._visible_fraction > 0.0:
-                    self._set_timer_interval(self.ANIMATION_FRAME_INTERVAL_MS)
-                else:
-                    self._set_timer_interval(self.POLL_INTERVAL_MS)
         else:
             self._visible_fraction = desired_fraction
-            if self._visible_fraction > 0.0:
-                self._set_timer_interval(self.ANIMATION_FRAME_INTERVAL_MS)
+
+        # A visible overlay needs the fast timer even after enter animation
+        # finishes because the halo continues to pulse. Once fully hidden, the
+        # timer returns to the slower polling interval to keep idle CPU wakeups
+        # low.
+        timer_interval = (
+            self.ANIMATION_FRAME_INTERVAL_MS
+            if self._animation_start_time_ms is not None
+            or self._visible_fraction > 0.0
+            else self.POLL_INTERVAL_MS
+        )
+        self._set_timer_interval(timer_interval)
 
         if self._visible_fraction <= 0.0:
             self._user32.ShowWindow(self._hwnd, self.SW_HIDE)
@@ -758,16 +790,16 @@ class ListeningIndicator:
         )
         alpha = round(255 * self._visible_fraction)
 
-        if self._bitmap_bits is None:
+        if self._bitmap_bits_ptr is None or self._halo_bitmap_frames is None:
             raise RuntimeError("Listening indicator bitmap is not ready.")
         halo_phase = (
             now_ms % self.HALO_PULSE_DURATION_MS
         ) / self.HALO_PULSE_DURATION_MS
-        halo_fraction = 0.5 - (math.cos(halo_phase * math.tau) * 0.5)
-        bitmap_bytes = self._to_premultiplied_bgra(
-            self._render_status_image(halo_fraction).convert("RGBA")
+        halo_frame_index = (
+            int(halo_phase * self.HALO_FRAME_COUNT) % self.HALO_FRAME_COUNT
         )
-        ctypes.memmove(self._bitmap_bits, bitmap_bytes, len(bitmap_bytes))
+        bitmap_bytes = self._halo_bitmap_frames[halo_frame_index]
+        ctypes.memmove(self._bitmap_bits_ptr, bitmap_bytes, len(bitmap_bytes))
 
         self._show_layered_window(x, y + slide_offset, alpha)
 
