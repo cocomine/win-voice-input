@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 import sys
 import threading
 import winreg
@@ -13,6 +14,7 @@ from svglib.svglib import svg2rlg
 
 from app_config import (
     AudioSettings,
+    CONFIG_SAVED_RESTART_EXIT_CODE,
     DictationSettings,
     FeedbackSettings,
     get_asset_dir,
@@ -69,6 +71,7 @@ class TrayDictationApp:
         )
         self.icon: pystray.Icon | None = None
         self._hotkey_thread: threading.Thread | None = None
+        self._restart_command: list[str] | None = None
         # Tray artwork is loaded from the shared assets folder so source runs
         # and packaged runs use the same required SVG files.
         asset_dir = get_asset_dir()
@@ -153,6 +156,24 @@ class TrayDictationApp:
         )
         logger.info("Tray icon started.")
         self.icon.run(setup=self._on_setup)
+        if self._restart_command is not None:
+            # Restart is delayed until pystray has stopped and runtime resources
+            # have been released. This prevents the new process from racing the
+            # old one for the global hotkey or listening indicator window.
+            try:
+                subprocess.Popen(self._restart_command)
+                logger.info("Restarted Win Voice Input after settings save.")
+            except OSError as exc:
+                logger.exception("Failed to restart after settings save.")
+                show_error_message(
+                    "Win Voice Input Restart Error",
+                    f"Settings were saved, but the app could not restart:\n\n{exc}",
+                )
+                print(
+                    f"\nFailed to restart Win Voice Input: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
     def _on_setup(self, icon: pystray.Icon) -> None:
         # pystray only auto-shows the icon when no custom setup callback is
@@ -210,22 +231,13 @@ class TrayDictationApp:
     def _on_pause(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         self.controller.stop()
 
-    def _on_open_settings(
-        self,
-        icon: pystray.Icon,
-        item: pystray.MenuItem,
-    ) -> None:
-        import subprocess
-
-        # The settings editor runs in a separate process because Qt owns its own
-        # event loop. Keeping it out of the pystray process avoids UI-loop
-        # contention while dictation and tray hotkeys keep running.
+    def _build_app_command(self, settings_mode: bool) -> list[str]:
+        # Source and packaged runs need different entry points. Keeping command
+        # construction in one place ensures Settings and restart launch the same
+        # application path and the same config.json file.
         if getattr(sys, "frozen", False):
             command = [
                 sys.executable,
-                "--settings",
-                "--config",
-                str(self.config_path),
             ]
         else:
             source_entry_point = (
@@ -234,12 +246,23 @@ class TrayDictationApp:
             command = [
                 sys.executable,
                 str(source_entry_point),
-                "--settings",
-                "--config",
-                str(self.config_path),
             ]
+        if settings_mode:
+            command.append("--settings")
+        command.extend(["--config", str(self.config_path)])
+        return command
+
+    def _on_open_settings(
+        self,
+        icon: pystray.Icon,
+        item: pystray.MenuItem,
+    ) -> None:
+        # The settings editor runs in a separate process because Qt owns its own
+        # event loop. Keeping it out of the pystray process avoids UI-loop
+        # contention while dictation and tray hotkeys keep running.
+        command = self._build_app_command(settings_mode=True)
         try:
-            subprocess.Popen(command)
+            settings_process = subprocess.Popen(command)
             logger.info("Opened settings editor for config: %s", self.config_path)
         except OSError as exc:
             logger.exception("Failed to open settings editor.")
@@ -252,6 +275,26 @@ class TrayDictationApp:
                 file=sys.stderr,
                 flush=True,
             )
+            return
+
+        def wait_for_settings_close() -> None:
+            exit_code = settings_process.wait()
+            if exit_code != CONFIG_SAVED_RESTART_EXIT_CODE:
+                return
+
+            logger.info("Settings save requested app restart.")
+            self._restart_command = self._build_app_command(settings_mode=False)
+            self._shutdown_runtime()
+            if self.icon is not None:
+                self.icon.stop()
+
+        # Waiting in a background thread keeps the tray menu responsive while
+        # the user edits settings. The child process exit code is the explicit
+        # signal that config.json was saved and the app should restart.
+        threading.Thread(
+            target=wait_for_settings_close,
+            daemon=True,
+        ).start()
 
     def _on_open_logs_folder(
         self,
@@ -268,11 +311,17 @@ class TrayDictationApp:
         self._open_folder(self.config_path.parent, "config")
 
     def _on_exit(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        self._shutdown_runtime()
+        icon.stop()
+
+    def _shutdown_runtime(self) -> None:
+        # Shutdown order matters: dictation stops first so audio/STT work ends,
+        # then the visual indicator and hotkey listener release their Win32
+        # resources before either normal exit or restart.
         self.controller.shutdown()
         if self.listening_indicator is not None:
             self.listening_indicator.shutdown()
         self.hotkey_listener.stop()
-        icon.stop()
 
     def _on_status_change(self, status: str) -> None:
         print(f"Status: {status}")

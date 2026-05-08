@@ -68,9 +68,10 @@ toggles listening.
 
 First launch: if the Google service account key is missing or invalid, Win
 Voice Input shows a setup error before starting the tray app. Choose Yes to open
-Settings, select the service account `.json` file, save, then start the app
-again. Settings validates that the selected credentials path exists, is a file,
-and uses the `.json` extension before saving.
+Settings, select the service account `.json` file, then save. Win Voice Input
+restarts automatically after a successful save. Settings validates that the
+selected credentials path exists, is a file, and uses the `.json` extension
+before saving.
 
 Create `config.json` by copying `config.example.json`, then edit values you want to remember. If `device` is `null` or missing, the app uses the Windows default input device.
 
@@ -128,8 +129,9 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 After it starts, a tray icon appears in the Windows notification area. Click into Notepad, Word, a browser text box, or any other target app. Press `Ctrl+Alt+Space` or use the tray menu to start listening. Press `Ctrl+Alt+Space` again, or choose Pause from the tray menu, to stop the current session.
 
 The tray menu also includes Settings, Open logs folder, and Open config folder.
-Settings opens a PySide6 editor for `config.json`; saved changes take effect
-after restarting the app. Logs are written to
+Settings opens a PySide6 editor for `config.json`; after a successful save, the
+tray app closes the current process and starts Win Voice Input again so changes
+take effect immediately. Logs are written to
 `%LOCALAPPDATA%\WinVoiceInput\logs\win-voice-input.log`, which is especially
 useful after building with `-Windowed`.
 

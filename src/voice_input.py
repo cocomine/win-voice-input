@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import stat
+import subprocess
 import sys
 import time
 from logging.handlers import RotatingFileHandler
@@ -12,6 +13,7 @@ import sounddevice as sd
 
 from app_config import (
     ALLOWED_LISTENING_INDICATOR_POSITIONS,
+    CONFIG_SAVED_RESTART_EXIT_CODE,
     DEFAULT_CHUNK_MS,
     DEFAULT_FINAL_DEDUPE_SECONDS,
     DEFAULT_IDLE_TIMEOUT_SECONDS,
@@ -319,6 +321,44 @@ def main() -> int:
             # When it closes successfully, the app exits successfully as well;
             # the next launch reloads config.json and starts tray/hotkey mode
             # with the corrected credentials.
+            if settings_result == CONFIG_SAVED_RESTART_EXIT_CODE:
+                # In the startup recovery path there is no tray parent process
+                # watching the Settings editor. Launch the main app explicitly
+                # after a successful save so first-time setup can continue
+                # without asking the user to start the program again.
+                if getattr(sys, "frozen", False):
+                    restart_command = [
+                        sys.executable,
+                        "--config",
+                        str(config_path),
+                    ]
+                else:
+                    restart_command = [
+                        sys.executable,
+                        str(Path(__file__).resolve()),
+                        "--config",
+                        str(config_path),
+                    ]
+                try:
+                    subprocess.Popen(restart_command)
+                    logging.info(
+                        "Restarted Win Voice Input after setup settings save."
+                    )
+                    return 0
+                except OSError as exc:
+                    logging.exception(
+                        "Failed to restart after setup settings save."
+                    )
+                    show_error_message(
+                        "Win Voice Input Restart Error",
+                        "Settings were saved, but the app could not restart:\n\n"
+                        f"{exc}",
+                    )
+                    print(
+                        f"\nError: Failed to restart Win Voice Input: {exc}",
+                        file=sys.stderr,
+                    )
+                    return 1
             return settings_result
         except Exception as exc:
             settings_message = (

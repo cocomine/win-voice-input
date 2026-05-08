@@ -10,6 +10,7 @@ import sounddevice as sd
 
 from app_config import (
     ALLOWED_LISTENING_INDICATOR_POSITIONS,
+    CONFIG_SAVED_RESTART_EXIT_CODE,
     DEFAULT_FINAL_DEDUPE_SECONDS,
     DEFAULT_IDLE_TIMEOUT_SECONDS,
     DEFAULT_LANGUAGE,
@@ -26,8 +27,8 @@ STARTUP_RUN_VALUE_NAME = "WinVoiceInput"
 
 class ConfigEditorWindow:
     # The settings editor is intentionally isolated from tray and dictation
-    # code. It edits config.json only; current listening sessions keep their
-    # already-loaded settings until the app is restarted.
+    # code. It edits config.json only, then signals the parent process to
+    # restart so the main app reloads settings from a clean startup path.
     def __init__(self, config_path: Path):
         from PySide6.QtWidgets import (
             QCheckBox,
@@ -45,6 +46,7 @@ class ConfigEditorWindow:
         )
 
         self.config_path = config_path
+        self.exit_code = 0
         self.startup_registry_available = True
         # Windows Run keys store a single command line string. For packaged
         # runs, sys.executable is WinVoiceInput.exe; for source runs, the
@@ -125,7 +127,10 @@ class ConfigEditorWindow:
         self.start_with_windows_check = QCheckBox("Start with Windows")
         form.addRow("", self.start_with_windows_check)
 
-        note = QLabel("Changes are saved to config.json and take effect after restarting the app.")
+        note = QLabel(
+            "Changes are saved to config.json. Saving restarts Win Voice Input "
+            "so the new settings are loaded."
+        )
         note.setWordWrap(True)
         root_layout.addWidget(note)
 
@@ -389,7 +394,7 @@ class ConfigEditorWindow:
         return credentials_path
 
     def _save_config(self) -> None:
-        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QApplication, QMessageBox
 
         credentials_text = self.credentials_edit.text().strip()
         validated_credentials_path = self._validate_credentials_path(credentials_text)
@@ -495,11 +500,20 @@ class ConfigEditorWindow:
                 return
 
         logger.info("Config editor saved config: %s", self.config_path)
+        self.exit_code = CONFIG_SAVED_RESTART_EXIT_CODE
         QMessageBox.information(
             self.window,
             "Settings saved",
-            "Settings saved. Restart Win Voice Input to apply changes.",
+            "Settings saved. Win Voice Input will restart now.",
         )
+        # The editor process exits with a dedicated code after a successful
+        # save. Tray mode watches for that code and restarts the main process;
+        # source setup recovery uses the same code to relaunch after first-time
+        # credential configuration.
+        self.window.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.exit(CONFIG_SAVED_RESTART_EXIT_CODE)
 
 
 def run_config_editor(config_path: Path) -> int:
@@ -513,5 +527,8 @@ def run_config_editor(config_path: Path) -> int:
     editor = ConfigEditorWindow(config_path)
     editor.show()
     if owns_app:
-        return app.exec()
-    return 0
+        app_result = app.exec()
+        if editor.exit_code:
+            return editor.exit_code
+        return app_result
+    return editor.exit_code
