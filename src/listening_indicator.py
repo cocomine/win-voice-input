@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import threading
+import time
 import traceback
 from io import BytesIO
 from ctypes import wintypes
@@ -124,13 +125,20 @@ class ListeningIndicator:
     WINDOW_HEIGHT = 56
     WORK_AREA_MARGIN_PX = 24
     TIMER_ID = 1
-    # The status window is fixed near the taskbar, so 120ms is responsive
-    # enough for start/stop visibility without unnecessary timer wakeups.
+    # The timer polls slowly while idle, then switches to roughly 60fps during
+    # animation. This keeps normal CPU wakeups low without making the 100ms
+    # fade-and-slide transition look stepped.
     POLL_INTERVAL_MS = 120
     STARTUP_TIMEOUT_SECONDS = 5
     SHUTDOWN_TIMEOUT_SECONDS = 2
     CLASS_NAME = "WinVoiceInputListeningIndicator"
     STATUS_TEXT = "Listening"
+    # The hidden fraction keeps the window slightly off-anchor. Alpha and y
+    # position are animated together so the overlay feels like one motion rather
+    # than a fade followed by a separate slide.
+    ANIMATION_DURATION_MS = 100
+    ANIMATION_FRAME_INTERVAL_MS = 16
+    ANIMATION_OFFSET_PX = 18
 
     # Pillow draws the status artwork at a higher resolution and downsamples it
     # before Windows displays it as a layered bitmap. mic.svg is used for the
@@ -193,6 +201,18 @@ class ListeningIndicator:
         self._memory_dc: int | None = None
         self._bitmap: int | None = None
         self._old_bitmap: int | None = None
+        # Animation is tracked as a small state machine. _visible_fraction is
+        # the current rendered progress where 0 means fully hidden and 1 means
+        # fully shown. When show()/hide() changes the desired target,
+        # _animation_start_time_ms records the transition start time,
+        # _animation_start_fraction preserves the current progress, and
+        # _animation_target_fraction stores the new destination. This lets the
+        # timer reverse direction smoothly if listening is toggled mid-motion.
+        self._visible_fraction = 0.0
+        self._animation_start_time_ms: float | None = None
+        self._animation_start_fraction = 0.0
+        self._animation_target_fraction = 0.0
+        self._timer_interval_ms = self.POLL_INTERVAL_MS
         self._asset_dir: Path
         self._font_path: Path
         self._mic_icon_image: Image.Image
@@ -477,6 +497,21 @@ class ListeningIndicator:
             return 0
         return self._user32.DefWindowProcW(hwnd, message, w_param, l_param)
 
+    def _set_timer_interval(self, interval_ms: int) -> None:
+        if self._hwnd is None or self._timer_interval_ms == interval_ms:
+            return
+        # SetTimer with the same timer id updates the existing timer period.
+        # The window can therefore render smooth animation frames only while a
+        # transition is active, then return to a slower polling cadence.
+        if not self._user32.SetTimer(
+            self._hwnd,
+            self.TIMER_ID,
+            interval_ms,
+            None,
+        ):
+            raise ctypes.WinError()
+        self._timer_interval_ms = interval_ms
+
     def _render_status_image(self) -> Image.Image:
         scale = self.RENDER_SCALE
         width = self.WINDOW_WIDTH * scale
@@ -585,7 +620,40 @@ class ListeningIndicator:
         if self._stop_event.is_set():
             self._user32.DestroyWindow(self._hwnd)
             return
-        if not self._visible_event.is_set():
+
+        now_ms = time.monotonic() * 1000.0
+        desired_fraction = 1.0 if self._visible_event.is_set() else 0.0
+        if desired_fraction != self._animation_target_fraction:
+            # The fraction represents both opacity and slide progress. Starting
+            # a new transition from the current fraction prevents visual jumps
+            # if the user quickly toggles listening while an animation is still
+            # moving.
+            self._animation_start_time_ms = now_ms
+            self._animation_start_fraction = self._visible_fraction
+            self._animation_target_fraction = desired_fraction
+            self._set_timer_interval(self.ANIMATION_FRAME_INTERVAL_MS)
+
+        if self._animation_start_time_ms is not None:
+            elapsed_ms = now_ms - self._animation_start_time_ms
+            progress = min(1.0, elapsed_ms / self.ANIMATION_DURATION_MS)
+            # Ease-out cubic gives the overlay a quick response at the start
+            # and a softer stop at the final anchored position.
+            eased_progress = 1.0 - ((1.0 - progress) ** 3)
+            fraction_delta = (
+                self._animation_target_fraction - self._animation_start_fraction
+            )
+            self._visible_fraction = (
+                self._animation_start_fraction
+                + (fraction_delta * eased_progress)
+            )
+            if progress >= 1.0:
+                self._visible_fraction = self._animation_target_fraction
+                self._animation_start_time_ms = None
+                self._set_timer_interval(self.POLL_INTERVAL_MS)
+        else:
+            self._visible_fraction = desired_fraction
+
+        if self._visible_fraction <= 0.0:
             self._user32.ShowWindow(self._hwnd, self.SW_HIDE)
             return
 
@@ -614,9 +682,22 @@ class ListeningIndicator:
         else:
             y = work_area.bottom - self.WINDOW_HEIGHT - self.WORK_AREA_MARGIN_PX
 
-        self._show_layered_window(x, y)
+        # Lower overlays animate from/to a slightly lower y coordinate; top
+        # overlays mirror that movement above the anchor. Mapping both alpha
+        # and offset to the same fraction keeps enter and exit directions exact:
+        # bottom enters upward and exits downward, top enters downward and exits
+        # upward.
+        vertical_direction = -1 if self.position.startswith("top") else 1
+        slide_offset = round(
+            vertical_direction
+            * self.ANIMATION_OFFSET_PX
+            * (1.0 - self._visible_fraction)
+        )
+        alpha = round(255 * self._visible_fraction)
 
-    def _show_layered_window(self, x: int, y: int) -> None:
+        self._show_layered_window(x, y + slide_offset, alpha)
+
+    def _show_layered_window(self, x: int, y: int, alpha: int) -> None:
         if self._hwnd is None or self._memory_dc is None:
             return
 
@@ -626,7 +707,7 @@ class ListeningIndicator:
         blend = BLENDFUNCTION(
             self.AC_SRC_OVER,
             0,
-            255,
+            alpha,
             self.AC_SRC_ALPHA,
         )
         if not self._user32.UpdateLayeredWindow(
