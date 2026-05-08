@@ -18,8 +18,19 @@ logger = logging.getLogger(__name__)
 # about three times per second is fast enough to feel live, while leaving time
 # for Pillow/Win32 redraw work so long Cantonese transcripts do not churn the UI.
 INTERIM_OVERLAY_MIN_INTERVAL_SECONDS = 0.35
+# Very narrow consoles cannot fit the "...: " prefix, leading ellipsis, and a
+# useful Cantonese suffix. Clamping at 20 columns keeps width calculations
+# positive and still leaves enough room for a short live preview.
 CONSOLE_INTERIM_MIN_COLUMNS = 20
 RecognitionTextCallback = Callable[[str], None]
+
+
+def _console_character_columns(character: str) -> int:
+    # Windows console cursor movement is column-based, while Cantonese glyphs
+    # are often East Asian wide characters. Counting wide/fullwidth glyphs as
+    # two columns keeps single-line interim previews from wrapping unexpectedly.
+    east_asian_width = unicodedata.east_asian_width(character)
+    return 2 if east_asian_width in ("F", "W") else 1
 
 
 def listen(
@@ -67,7 +78,11 @@ def listen(
     stream_context = None
     last_interim_overlay_time = 0.0
     last_interim_overlay_text = ""
+    # Track the previous one-line console preview width so the next preview or
+    # final line can erase trailing characters left by a longer interim result.
     last_console_interim_width = 0
+    # Number streaming responses in debug logs; Google can send multiple
+    # results per response, so this makes overlay decisions traceable.
     response_index = 0
     try:
         if dictation_settings.idle_timeout_seconds > 0:
@@ -172,11 +187,7 @@ def listen(
                     text_columns = max(0, console_columns - len(console_prefix) - 1)
                     transcript_width = 0
                     for character in transcript:
-                        transcript_width += (
-                            2
-                            if unicodedata.east_asian_width(character) in ("F", "W")
-                            else 1
-                        )
+                        transcript_width += _console_character_columns(character)
 
                     if transcript_width > text_columns:
                         ellipsis = "..."
@@ -184,12 +195,7 @@ def listen(
                         suffix_width = 0
                         suffix_chars: list[str] = []
                         for character in reversed(transcript):
-                            character_width = (
-                                2
-                                if unicodedata.east_asian_width(character)
-                                in ("F", "W")
-                                else 1
-                            )
+                            character_width = _console_character_columns(character)
                             if suffix_width + character_width > suffix_columns:
                                 break
                             suffix_chars.append(character)
