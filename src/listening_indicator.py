@@ -637,6 +637,9 @@ class ListeningIndicator:
                 display_text = ""
                 text_bbox = (0, 0, 0, 0)
             else:
+                # Suffix length zero means "..." only, which was measured
+                # above. Start at one so the search still includes the
+                # one-character suffix without re-testing the same ellipsis.
                 low = 1
                 high = len(original_text)
                 while low <= high:

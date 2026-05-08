@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Google can emit several interim revisions per second. Updating the overlay
 # about three times per second is fast enough to feel live, while leaving time
 # for Pillow/Win32 redraw work so long Cantonese transcripts do not churn the UI.
-INTERIM_OVERLAY_MIN_INTERVAL_SECONDS = 0.35
+INTERIM_OVERLAY_MIN_INTERVAL_SECONDS = 0.20
 RecognitionTextCallback = Callable[[str], None]
 
 
