@@ -618,35 +618,41 @@ class ListeningIndicator:
         )
         if text_bbox[2] - text_bbox[0] > text_max_width:
             # The overlay is a status surface, not an editor. Long interim
-            # transcripts are ellipsized at the front so the newest recognized
-            # words remain visible. Binary search keeps the number of text
+            # transcripts use a leading ellipsis so the newest recognized words
+            # remain visible. Binary search keeps the number of text
             # measurements small even when Google returns a very long interim
             # transcript.
             ellipsis = "..."
             original_text = display_text
-            low = 0
-            high = len(original_text)
             display_text = ellipsis
             text_bbox = measure_draw.textbbox(
                 (0, 0),
                 display_text,
                 font=self._status_font,
             )
-            while low <= high:
-                midpoint = (low + high) // 2
-                suffix = "" if midpoint == 0 else original_text[-midpoint:]
-                candidate_text = f"{ellipsis}{suffix}"
-                candidate_bbox = measure_draw.textbbox(
-                    (0, 0),
-                    candidate_text,
-                    font=self._status_font,
-                )
-                if candidate_bbox[2] - candidate_bbox[0] <= text_max_width:
-                    display_text = candidate_text
-                    text_bbox = candidate_bbox
-                    low = midpoint + 1
-                else:
-                    high = midpoint - 1
+            if text_bbox[2] - text_bbox[0] > text_max_width:
+                # This should not happen with the current overlay dimensions,
+                # but keeping the edge case explicit prevents a future narrower
+                # layout from rendering text outside the panel.
+                display_text = ""
+                text_bbox = (0, 0, 0, 0)
+            else:
+                low = 1
+                high = len(original_text)
+                while low <= high:
+                    midpoint = (low + high) // 2
+                    candidate_text = f"{ellipsis}{original_text[-midpoint:]}"
+                    candidate_bbox = measure_draw.textbbox(
+                        (0, 0),
+                        candidate_text,
+                        font=self._status_font,
+                    )
+                    if candidate_bbox[2] - candidate_bbox[0] <= text_max_width:
+                        display_text = candidate_text
+                        text_bbox = candidate_bbox
+                        low = midpoint + 1
+                    else:
+                        high = midpoint - 1
 
         # The content remains left-aligned so the overlay behaves like a compact
         # status panel. Only vertical centering is dynamic; horizontal centering
