@@ -51,7 +51,8 @@ This workspace already has a local `.venv` with the dependencies installed, so y
 
 ## Project Layout
 
-- `src\` - Python source files for dictation, tray UI, hotkey control, status window, and Windows text output.
+- `src\voice_input.py` - Python entry point used by scripts and packaging.
+- `src\audio\`, `src\config\`, `src\dictation\`, `src\output\`, `src\ui\`, `src\win32_types\` - grouped source packages. Class-bearing files are kept to one class per file for easier review.
 - `assets\` - required tray/status assets: `mic.svg`, `mic-mute.svg`, `start.mp3`, and `end.mp3`.
 - `run-dictation.ps1`, `list-devices.ps1`, `build.ps1` - root-level PowerShell scripts for daily use, microphone listing, and packaging.
 - `config.example.json` - optional local settings template.

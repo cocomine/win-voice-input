@@ -5,14 +5,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app_config import (
+from config import (
     AudioSettings,
     DictationSettings,
     FeedbackSettings,
     get_asset_dir,
 )
-from dictation_session import listen
-from error_dialog import show_error_message
+from dictation.dictation_session import listen
+from ui.error_dialog import show_error_message
 
 if TYPE_CHECKING:
     import pygame

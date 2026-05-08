@@ -11,17 +11,17 @@ from PIL import Image
 from reportlab.graphics import renderPM
 from svglib.svglib import svg2rlg
 
-from app_config import (
+from config import (
     AudioSettings,
     CONFIG_SAVED_RESTART_EXIT_CODE,
     DictationSettings,
     FeedbackSettings,
     get_asset_dir,
 )
-from dictation_controller import DictationController
-from error_dialog import show_error_message
-from global_hotkey import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
-from listening_indicator import ListeningIndicator
+from dictation.dictation_controller import DictationController
+from ui.error_dialog import show_error_message
+from ui.global_hotkey_listener import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
+from ui.listening_indicator import ListeningIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -248,8 +248,12 @@ class TrayDictationApp:
                 sys.executable,
             ]
         else:
+            # tray_dictation_app.py now lives under src/ui; the runnable source
+            # entry remains at src/voice_input.py so scripts and PyInstaller
+            # keep one stable entry point.
             source_entry_point = (
-                Path(__file__).resolve().parent / self.SOURCE_ENTRY_POINT_FILE_NAME
+                Path(__file__).resolve().parent.parent
+                / self.SOURCE_ENTRY_POINT_FILE_NAME
             )
             command = [
                 sys.executable,

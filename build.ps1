@@ -20,10 +20,10 @@ if (-not (Test-Path -LiteralPath $pythonExe)) {
 
 $requiredAssets = @("mic.svg", "mic-mute.svg", "start.mp3", "end.mp3")
 foreach ($asset in $requiredAssets) {
-    # These files are required at runtime because tray_app.py renders the tray
-    # icon from SVGs and dictation_controller.py plays MP3 state cues. The build
-    # stops early if they are missing so the packaged exe cannot be created with
-    # broken status feedback.
+    # These files are required at runtime because the tray UI renders icons from
+    # SVGs and DictationController plays MP3 state cues. The build stops early
+    # if they are missing so the packaged exe cannot be created with broken
+    # status feedback.
     if (-not (Test-Path -LiteralPath (Join-Path $assetDir $asset))) {
         Write-Host "Missing required app asset: assets\$asset"
         exit 1

@@ -5,7 +5,7 @@ import threading
 
 import sounddevice as sd
 
-from app_config import AudioSettings
+from config import AudioSettings
 
 logger = logging.getLogger(__name__)
 

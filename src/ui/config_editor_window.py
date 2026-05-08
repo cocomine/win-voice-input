@@ -8,7 +8,7 @@ from pathlib import Path
 
 import sounddevice as sd
 
-from app_config import (
+from config import (
     ALLOWED_LISTENING_INDICATOR_POSITIONS,
     CONFIG_SAVED_RESTART_EXIT_CODE,
     DEFAULT_FINAL_DEDUPE_SECONDS,

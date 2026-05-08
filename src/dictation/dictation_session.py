@@ -8,10 +8,11 @@ from collections.abc import Callable
 
 from google.cloud import speech
 
-from app_config import AudioSettings, DictationSettings
-from audio_capture import MicrophoneStream
-from text_processing import FinalTranscriptDeduper, prepare_text
-from windows_text_output import WindowsTextOutput
+from audio.microphone_stream import MicrophoneStream
+from config import AudioSettings, DictationSettings
+from dictation.final_transcript_deduper import FinalTranscriptDeduper
+from dictation.text_processing import prepare_text
+from output.windows_text_output import WindowsTextOutput
 
 logger = logging.getLogger(__name__)
 # Google can emit several interim revisions per second. Updating the overlay

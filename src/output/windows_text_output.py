@@ -2,6 +2,8 @@ import ctypes
 import time
 from ctypes import wintypes
 
+from win32_types import INPUT, INPUT_UNION, KEYBDINPUT
+
 
 VK_BACK = 0x08
 VK_CONTROL = 0x11
@@ -10,58 +12,6 @@ KEYEVENTF_KEYUP = 0x0002
 INPUT_KEYBOARD = 1
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
-
-ULONG_PTR = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
-
-
-class KEYBDINPUT(ctypes.Structure):
-    # SendInput requires the same memory layout as the Win32 INPUT union.
-    # The mouse and hardware branches below are included even though dictation
-    # only sends keyboard events, because Windows validates the full structure
-    # size before accepting any simulated key press.
-    _fields_ = [
-        ("wVk", wintypes.WORD),
-        ("wScan", wintypes.WORD),
-        ("dwFlags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ULONG_PTR),
-    ]
-
-
-class MOUSEINPUT(ctypes.Structure):
-    # The mouse and hardware structures are not used directly, but they make the
-    # INPUT union match Win32's real size. Removing them caused SendInput to fail
-    # with WinError 87 on 64-bit Windows.
-    _fields_ = [
-        ("dx", wintypes.LONG),
-        ("dy", wintypes.LONG),
-        ("mouseData", wintypes.DWORD),
-        ("dwFlags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ULONG_PTR),
-    ]
-
-
-class HARDWAREINPUT(ctypes.Structure):
-    _fields_ = [
-        ("uMsg", wintypes.DWORD),
-        ("wParamL", wintypes.WORD),
-        ("wParamH", wintypes.WORD),
-    ]
-
-
-class INPUT_UNION(ctypes.Union):
-    _fields_ = [
-        ("mi", MOUSEINPUT),
-        ("ki", KEYBDINPUT),
-        ("hi", HARDWAREINPUT),
-    ]
-
-
-class INPUT(ctypes.Structure):
-    # Windows validates this full INPUT layout, not just the KEYBDINPUT branch.
-    # On 64-bit Windows ctypes.sizeof(INPUT) should be 40 bytes.
-    _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
 
 
 class WindowsTextOutput:
