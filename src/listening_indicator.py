@@ -148,8 +148,10 @@ class ListeningIndicator:
     ANIMATION_OFFSET_PX = 18
     HALO_PULSE_DURATION_MS = 1000
     # One second at a 16ms timer cadence is about 60 frames. Halo frames are
-    # cached lazily instead of rebuilt all at once when interim text changes,
-    # because Google may update recognition text several times per second.
+    # cached lazily because Google may update recognition text several times
+    # per second: this avoids a blocking rebuild of all frames on every text
+    # change, at the cost of a possible first-use frame stutter after each
+    # cache clear.
     HALO_FRAME_COUNT = 60
 
     # Pillow draws the status artwork at a higher resolution and downsamples it
@@ -225,8 +227,8 @@ class ListeningIndicator:
         self._memory_dc: int | None = None
         self._bitmap: int | None = None
         # CreateDIBSection returns a raw memory address. Keeping the pointer
-        # lets the timer copy cached BGRA frames into the same bitmap instead
-        # of allocating GDI resources for every halo pulse frame.
+        # lets the timer copy on-demand cached BGRA frames into the same bitmap
+        # instead of allocating GDI resources for every halo pulse frame.
         self._bitmap_bits_ptr: int | None = None
         self._old_bitmap: int | None = None
         # Animation is tracked as a small state machine. _visible_fraction is
@@ -247,6 +249,9 @@ class ListeningIndicator:
         self._status_font: ImageFont.FreeTypeFont
         self._status_base_image: Image.Image | None = None
         self._status_foreground_image: Image.Image | None = None
+        # Frame keys are produced with modulo HALO_FRAME_COUNT and the cache is
+        # cleared whenever text changes, so this dictionary is naturally bounded
+        # to at most one pulse cycle instead of growing with every transcript.
         self._halo_bitmap_frames: dict[int, bytes] = {}
         # Dictation callbacks run on the recognition worker thread, while the
         # layered window must redraw on its own Win32 message thread. The
@@ -798,7 +803,7 @@ class ListeningIndicator:
         self._memory_dc = None
         self._bitmap = None
         self._bitmap_bits_ptr = None
-        self._halo_bitmap_frames = None
+        self._halo_bitmap_frames = {}
         self._old_bitmap = None
 
     def _to_premultiplied_bgra(self, image: Image.Image) -> bytes:
