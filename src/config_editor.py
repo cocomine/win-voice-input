@@ -244,6 +244,10 @@ class ConfigEditorWindow:
         if index >= 0:
             self.indicator_position_combo.setCurrentIndex(index)
 
+        # Empty string means no valid startup command was found, so the
+        # checkbox remains unchecked. Initializing before registry access makes
+        # that default explicit for both readers and static analysis tools.
+        startup_command = ""
         try:
             with winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
@@ -254,7 +258,7 @@ class ConfigEditorWindow:
                     STARTUP_RUN_VALUE_NAME,
                 )
         except FileNotFoundError:
-            startup_command = ""
+            pass
         except OSError as exc:
             # Reading the Run key is optional for dictation itself, but the
             # Settings window must not pretend it knows the startup state when
