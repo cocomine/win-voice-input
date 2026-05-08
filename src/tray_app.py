@@ -61,6 +61,7 @@ class TrayDictationApp:
             dictation_settings,
             feedback_settings,
             self._on_status_change,
+            self._on_recognition_text,
         )
         self.hotkey_listener = GlobalHotkeyListener()
         self.listening_indicator = (
@@ -339,8 +340,10 @@ class TrayDictationApp:
         logger.info("Status changed: %s", status)
         if self.listening_indicator is not None:
             if status == "Listening":
+                self.listening_indicator.set_text("")
                 self.listening_indicator.show()
             else:
+                self.listening_indicator.set_text("")
                 self.listening_indicator.hide()
 
         if self.icon is None:
@@ -351,6 +354,12 @@ class TrayDictationApp:
         self.icon.icon = self._images[status]
         self.icon.title = f"Win Voice Input - {status}"
         self.icon.update_menu()
+
+    def _on_recognition_text(self, text: str) -> None:
+        # Recognition text is shown only on the overlay. It deliberately stays
+        # out of the active editor until Google returns a final result.
+        if self.listening_indicator is not None:
+            self.listening_indicator.set_text(text)
 
     def _open_folder(self, folder_path: Path, folder_label: str) -> None:
         # Tray callbacks run on the pystray UI thread. Opening a folder should

@@ -7,7 +7,8 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Reads audio from your microphone.
 - Streams it to Google Speech-to-Text.
 - Prints interim and final transcripts in the terminal.
-- Pastes final transcripts into the active Windows app.
+- Shows interim transcripts on the listening overlay, then pastes only final
+  transcripts into the active Windows app.
 - Shows a system tray icon with Idle / Listening / Stopping status.
 - Lets you open Settings, logs folder, and config folder from the tray menu.
 - Shows a small listening status window while listening.
@@ -23,7 +24,10 @@ First test version for Cantonese dictation on Windows using Google Speech-to-Tex
 - Can be packaged as a Windows `.exe` with the tray SVG assets included.
 - Defaults to Hong Kong Cantonese: `yue-Hant-HK`.
 
-Interim text is only shown in the terminal. Only final text is pasted.
+Interim text is shown on the listening overlay as recognition feedback. It is
+rate-limited so very fast Google updates do not force the overlay to redraw too
+often, and it is cleared when a final result arrives. Only final text is pasted
+into the active Windows app.
 
 ## Setup
 
@@ -209,7 +213,7 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 
 - Google streaming sessions have time limits, so this prototype is meant for short tests.
 - If your microphone fails at `16000` Hz, try `--rate 48000`.
-- Paste mode uses the Windows clipboard, so your clipboard content will be replaced by the latest final transcript.
+- Paste mode uses the Windows clipboard for final transcripts, so your clipboard content will be replaced by the latest final transcript.
 - Duplicate protection can be enabled with `-FinalDedupeSeconds 0.8`. The current script default is `0`.
 - Idle auto-stop is enabled by default with `-IdleTimeoutSeconds 5`; use `0` to disable it.
 - The packaged exe reads `config.json` from the same folder as `WinVoiceInput.exe`.

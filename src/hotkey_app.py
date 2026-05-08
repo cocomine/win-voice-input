@@ -25,6 +25,7 @@ class HotkeyDictationApp:
             dictation_settings,
             feedback_settings,
             self._on_status_change,
+            self._on_recognition_text,
         )
         self.hotkey_listener = GlobalHotkeyListener()
         self.listening_indicator = (
@@ -49,13 +50,23 @@ class HotkeyDictationApp:
         logger.info("Hotkey app status changed: %s", status)
         if status == "Listening":
             if self.listening_indicator is not None:
+                self.listening_indicator.set_text("")
                 self.listening_indicator.show()
             print(f"Status: Listening. Press {HOTKEY_DISPLAY_NAME} to pause.")
         elif status == "Stopping":
             if self.listening_indicator is not None:
+                self.listening_indicator.set_text("")
                 self.listening_indicator.hide()
             print("Status: Stopping current dictation session...")
         elif status == "Idle":
             if self.listening_indicator is not None:
+                self.listening_indicator.set_text("")
                 self.listening_indicator.hide()
             print(f"Status: Idle. Press {HOTKEY_DISPLAY_NAME} to start.")
+
+    def _on_recognition_text(self, text: str) -> None:
+        # Console hotkey mode uses the same overlay preview path as tray mode:
+        # interim text is visible to the user but is not inserted into the
+        # active Windows app until a final transcript arrives.
+        if self.listening_indicator is not None:
+            self.listening_indicator.set_text(text)

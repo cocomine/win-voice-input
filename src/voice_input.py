@@ -632,9 +632,17 @@ def main() -> int:
                 if listening_indicator is None:
                     return
                 if status == "Listening":
+                    listening_indicator.set_text("")
                     listening_indicator.show()
                 else:
+                    listening_indicator.set_text("")
                     listening_indicator.hide()
+
+            def on_immediate_recognition_text(text: str) -> None:
+                # Immediate mode has no tray object, but it can still show the
+                # same overlay-only interim preview as tray and hotkey modes.
+                if listening_indicator is not None:
+                    listening_indicator.set_text(text)
 
             controller = DictationController(
                 str(settings["language"]),
@@ -642,6 +650,7 @@ def main() -> int:
                 dictation_settings,
                 feedback_settings,
                 on_immediate_status_change,
+                on_immediate_recognition_text,
             )
             try:
                 controller.start()

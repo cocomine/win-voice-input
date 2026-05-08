@@ -122,18 +122,21 @@ class ListeningIndicator:
     # active listening. It intentionally does not follow the text caret because
     # browser-rendered editors often draw their own caret and do not expose a
     # reliable Windows caret position.
-    WINDOW_WIDTH = 176
-    WINDOW_HEIGHT = 56
+    WINDOW_WIDTH = 420
+    WINDOW_HEIGHT = 64
     WORK_AREA_MARGIN_PX = 24
     TIMER_ID = 1
     # The timer polls slowly while hidden, then switches to roughly 60fps while
-    # visible. The fast cadence is required both for the 100ms enter/exit slide
+    # visible. The fast cadence is required both for the 600ms enter/exit slide
     # and for the listening halo's 1-second pulse loop.
     POLL_INTERVAL_MS = 120
     STARTUP_TIMEOUT_SECONDS = 5
     SHUTDOWN_TIMEOUT_SECONDS = 2
     CLASS_NAME = "WinVoiceInputListeningIndicator"
     STATUS_TEXT = "Listening"
+    CONTENT_SIDE_PADDING_PX = 18
+    ICON_BUBBLE_SIZE_PX = 34
+    ICON_TEXT_GAP_PX = 14
     # The hidden fraction keeps the window slightly off-anchor. Alpha and y
     # position are animated together so the overlay feels like one motion rather
     # than a fade followed by a separate slide.
@@ -167,7 +170,7 @@ class ListeningIndicator:
     CONTENT_COLOR = (*CONTENT_COLOR_RGB, 255)
     CONTENT_COLOR_HEX = "#{:02x}{:02x}{:02x}".format(*CONTENT_COLOR_RGB)
     FONT_ENV_VAR = "WIN_VOICE_INPUT_STATUS_FONT"
-    FONT_FILE_NAME = "segoeui.ttf"
+    FONT_FILE_NAMES = ("msjh.ttc", "msyh.ttc", "mingliu.ttc", "segoeui.ttf")
     FONT_SIZE = 14
 
     WM_DESTROY = 0x0002
@@ -206,6 +209,7 @@ class ListeningIndicator:
         self._visible_event = threading.Event()
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
+        self._text_lock = threading.Lock()
         self._user32 = ctypes.windll.user32
         self._gdi32 = ctypes.windll.gdi32
         self._kernel32 = ctypes.windll.kernel32
@@ -237,6 +241,12 @@ class ListeningIndicator:
         self._status_base_image: Image.Image | None = None
         self._status_foreground_image: Image.Image | None = None
         self._halo_bitmap_frames: list[bytes] | None = None
+        # Dictation callbacks run on the recognition worker thread, while the
+        # layered window must redraw on its own Win32 message thread. The
+        # pending/display split lets set_text() stay thread-safe and keeps all
+        # bitmap rendering inside the window thread.
+        self._display_text = self.STATUS_TEXT
+        self._pending_text = self.STATUS_TEXT
         self._class_name = f"{self.CLASS_NAME}{id(self)}"
         self._window_procedure = WindowProcedure(self._handle_window_message)
 
@@ -251,16 +261,28 @@ class ListeningIndicator:
                 raise RuntimeError(
                     "Unable to locate the Windows font directory because WINDIR "
                     f"is not set. Set {self.FONT_ENV_VAR} to a readable .ttf "
-                    "font file such as segoeui.ttf."
+                    "or .ttc font file such as msjh.ttc."
                 )
-            self._font_path = Path(windows_dir) / "Fonts" / self.FONT_FILE_NAME
+            fonts_dir = Path(windows_dir) / "Fonts"
+            self._font_path = next(
+                (
+                    fonts_dir / font_file_name
+                    for font_file_name in self.FONT_FILE_NAMES
+                    if (fonts_dir / font_file_name).exists()
+                ),
+                fonts_dir / self.FONT_FILE_NAMES[0],
+            )
 
         if not self._font_path.exists():
+            expected_fonts = ", ".join(self.FONT_FILE_NAMES)
             raise RuntimeError(
                 f"Required status window font is missing: {self._font_path}. "
-                f"Verify Windows Fonts contains {self.FONT_FILE_NAME}, or set "
-                f"{self.FONT_ENV_VAR} to a readable .ttf font file."
+                f"Verify Windows Fonts contains one of {expected_fonts}, or "
+                f"set {self.FONT_ENV_VAR} to a readable .ttf or .ttc font file."
             )
+        # Interim transcripts may contain Traditional Chinese. Segoe UI often
+        # lacks those glyphs in Pillow-rendered text, which appears as square
+        # boxes, so the default candidates prefer CJK-capable Windows fonts.
         self._status_font = ImageFont.truetype(
             str(self._font_path),
             self.FONT_SIZE * self.RENDER_SCALE,
@@ -420,6 +442,14 @@ class ListeningIndicator:
     def hide(self) -> None:
         self._visible_event.clear()
 
+    def set_text(self, text: str) -> None:
+        # Interim recognition text is a visual cue only. Normalizing whitespace
+        # here prevents multiline recognition fragments from resizing or
+        # overlapping the compact overlay layout.
+        normalized_text = " ".join(str(text).split()) or self.STATUS_TEXT
+        with self._text_lock:
+            self._pending_text = normalized_text
+
     def shutdown(self) -> None:
         self._visible_event.clear()
         self._stop_event.set()
@@ -537,6 +567,20 @@ class ListeningIndicator:
             raise ctypes.WinError()
         self._timer_interval_ms = interval_ms
 
+    def _sync_pending_text(self) -> None:
+        with self._text_lock:
+            pending_text = self._pending_text
+        if pending_text == self._display_text:
+            return
+
+        # Only the text layer changes when Google sends a new interim result.
+        # Clearing the cached artwork and rebuilding the pre-rendered halo
+        # frames keeps the normal timer path allocation-free between updates.
+        self._display_text = pending_text
+        self._status_base_image = None
+        self._status_foreground_image = None
+        self._halo_bitmap_frames = self._build_halo_bitmap_frames()
+
     def _render_status_image(self, halo_fraction: float) -> Image.Image:
         """Render one status image.
 
@@ -548,6 +592,60 @@ class ListeningIndicator:
         scale = self.RENDER_SCALE
         width = self.WINDOW_WIDTH * scale
         height = self.WINDOW_HEIGHT * scale
+        icon_bubble_size = self.ICON_BUBBLE_SIZE_PX * scale
+        icon_text_gap = self.ICON_TEXT_GAP_PX * scale
+
+        display_text = self._display_text or self.STATUS_TEXT
+        text_max_width = (
+            self.WINDOW_WIDTH
+            - (self.CONTENT_SIDE_PADDING_PX * 2)
+            - self.ICON_BUBBLE_SIZE_PX
+            - self.ICON_TEXT_GAP_PX
+        ) * scale
+        # A tiny measuring surface is enough for textbbox. Keeping measurement
+        # outside the drawing cache means the same computed content positions
+        # can drive both the static foreground and the animated halo center.
+        measure_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1), (0, 0, 0, 0)))
+        text_bbox = measure_draw.textbbox(
+            (0, 0),
+            display_text,
+            font=self._status_font,
+        )
+        if text_bbox[2] - text_bbox[0] > text_max_width:
+            # The overlay is a status surface, not an editor. Long interim
+            # transcripts are ellipsized so the bubble, border, and text never
+            # overlap while recognition keeps updating.
+            ellipsis = "..."
+            while display_text:
+                candidate_text = f"{display_text}{ellipsis}"
+                candidate_bbox = measure_draw.textbbox(
+                    (0, 0),
+                    candidate_text,
+                    font=self._status_font,
+                )
+                if candidate_bbox[2] - candidate_bbox[0] <= text_max_width:
+                    display_text = candidate_text
+                    text_bbox = candidate_bbox
+                    break
+                display_text = display_text[:-1]
+            if not display_text:
+                display_text = ellipsis
+                text_bbox = measure_draw.textbbox(
+                    (0, 0),
+                    display_text,
+                    font=self._status_font,
+                )
+
+        # The content remains left-aligned so the overlay behaves like a compact
+        # status panel. Only vertical centering is dynamic; horizontal centering
+        # made the icon jump visually when short/long interim text changed.
+        bubble_left = self.CONTENT_SIDE_PADDING_PX * scale
+        bubble_top = (height - icon_bubble_size) // 2
+        bubble_right = bubble_left + icon_bubble_size
+        bubble_bottom = bubble_top + icon_bubble_size
+        bubble_center_x = bubble_left + (icon_bubble_size // 2)
+        bubble_center_y = height // 2
+        text_x = bubble_right + icon_text_gap
 
         if self._status_base_image is None or self._status_foreground_image is None:
             # Only the halo changes every timer frame. The panel, microphone
@@ -566,29 +664,24 @@ class ListeningIndicator:
             foreground_image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             foreground_draw = ImageDraw.Draw(foreground_image)
             foreground_draw.ellipse(
-                (16 * scale, 11 * scale, 50 * scale, 45 * scale),
+                (bubble_left, bubble_top, bubble_right, bubble_bottom),
                 fill=self.BUBBLE_FILL_COLOR,
                 outline=self.BUBBLE_OUTLINE_COLOR,
                 width=2 * scale,
             )
 
-            mic_left = (33 * scale) - (self._mic_icon_image.width // 2)
-            mic_top = (28 * scale) - (self._mic_icon_image.height // 2)
+            mic_left = bubble_center_x - (self._mic_icon_image.width // 2)
+            mic_top = bubble_center_y - (self._mic_icon_image.height // 2)
             foreground_image.alpha_composite(
                 self._mic_icon_image,
                 (mic_left, mic_top),
             )
 
-            text_bbox = foreground_draw.textbbox(
-                (0, 0),
-                self.STATUS_TEXT,
-                font=self._status_font,
-            )
             text_height = text_bbox[3] - text_bbox[1]
             text_y = ((self.WINDOW_HEIGHT * scale) - text_height) // 2 - text_bbox[1]
             foreground_draw.text(
-                (64 * scale, text_y),
-                self.STATUS_TEXT,
+                (text_x - text_bbox[0], text_y),
+                display_text,
                 fill=self.CONTENT_COLOR,
                 font=self._status_font,
             )
@@ -604,8 +697,8 @@ class ListeningIndicator:
             )
             * scale
         )
-        halo_center_x = 33 * scale
-        halo_center_y = 28 * scale
+        halo_center_x = bubble_center_x
+        halo_center_y = bubble_center_y
         # The halo is drawn before the blue microphone bubble so only the
         # outside ring remains visible. The pulse fraction comes from a
         # 1-second clock loop; it changes radius only, with no gradient or color
@@ -627,19 +720,23 @@ class ListeningIndicator:
             Image.Resampling.LANCZOS,
         )
 
-    def _create_status_bitmap(self) -> None:
-        self._halo_bitmap_frames = []
+    def _build_halo_bitmap_frames(self) -> list[bytes]:
+        halo_bitmap_frames = []
         for frame_index in range(self.HALO_FRAME_COUNT):
             halo_phase = frame_index / self.HALO_FRAME_COUNT
             # cos() normally produces -1..1. This expression normalizes one
             # full tau cycle to a 0..1..0 radius curve, giving the halo a smooth
             # expand-and-shrink pulse without changing its color or opacity.
             halo_fraction = 0.5 - (cos(halo_phase * tau) * 0.5)
-            self._halo_bitmap_frames.append(
+            halo_bitmap_frames.append(
                 self._to_premultiplied_bgra(
                     self._render_status_image(halo_fraction).convert("RGBA")
                 )
             )
+        return halo_bitmap_frames
+
+    def _create_status_bitmap(self) -> None:
+        self._halo_bitmap_frames = self._build_halo_bitmap_frames()
         bitmap_bytes = self._halo_bitmap_frames[0]
 
         bitmap_info = BITMAPINFO()
@@ -707,6 +804,7 @@ class ListeningIndicator:
             return
 
         now_ms = time.monotonic() * 1000.0
+        self._sync_pending_text()
         desired_fraction = 1.0 if self._visible_event.is_set() else 0.0
         if desired_fraction != self._animation_target_fraction:
             # The fraction represents both opacity and slide progress. Starting

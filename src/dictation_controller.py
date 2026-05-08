@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 StatusCallback = Callable[[str], None]
+RecognitionTextCallback = Callable[[str], None]
 logger = logging.getLogger(__name__)
 
 
@@ -38,12 +39,14 @@ class DictationController:
         dictation_settings: DictationSettings,
         feedback_settings: FeedbackSettings,
         on_status_change: StatusCallback | None = None,
+        on_recognition_text: RecognitionTextCallback | None = None,
     ):
         self.language = language
         self.audio_settings = audio_settings
         self.dictation_settings = dictation_settings
         self.feedback_settings = feedback_settings
         self.on_status_change = on_status_change
+        self.on_recognition_text = on_recognition_text
         self.status = "Idle"
         self._sound_error: type[Exception] | None = None
         self._start_sound: "pygame.mixer.Sound | None" = None
@@ -141,6 +144,7 @@ class DictationController:
                 self.audio_settings,
                 self.dictation_settings,
                 self._stop_event,
+                self.on_recognition_text,
             )
         except Exception as exc:
             logger.exception("Dictation session failed.")

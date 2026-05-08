@@ -1,6 +1,8 @@
 import logging
 import sys
 import threading
+import time
+from collections.abc import Callable
 
 from google.cloud import speech
 
@@ -10,6 +12,8 @@ from text_processing import FinalTranscriptDeduper, prepare_text
 from windows_text_output import WindowsTextOutput
 
 logger = logging.getLogger(__name__)
+INTERIM_OVERLAY_MIN_INTERVAL_SECONDS = 0.35
+RecognitionTextCallback = Callable[[str], None]
 
 
 def listen(
@@ -17,6 +21,7 @@ def listen(
     audio_settings: AudioSettings,
     dictation_settings: DictationSettings,
     stop_event: threading.Event | None = None,
+    on_recognition_text: RecognitionTextCallback | None = None,
 ) -> None:
     client = speech.SpeechClient()
     # Hotkey mode passes in its own event so pressing the configured shortcut
@@ -54,6 +59,8 @@ def listen(
         text_output = None
 
     stream_context = None
+    last_interim_overlay_time = 0.0
+    last_interim_overlay_text = ""
     try:
         if dictation_settings.idle_timeout_seconds > 0:
             # The timeout is based on recognized text rather than raw microphone
@@ -116,7 +123,27 @@ def listen(
                 print(f"{prefix}: {transcript}", end=end, flush=True)
 
                 if not result.is_final:
+                    if on_recognition_text is not None:
+                        now = time.monotonic()
+                        if (
+                            transcript != last_interim_overlay_text
+                            and now - last_interim_overlay_time
+                            >= INTERIM_OVERLAY_MIN_INTERVAL_SECONDS
+                        ):
+                            # Interim results are displayed only on the
+                            # listening overlay. They are rate-limited because
+                            # Google can revise text faster than the UI needs
+                            # to redraw, and they never touch the active editor.
+                            on_recognition_text(transcript)
+                            last_interim_overlay_text = transcript
+                            last_interim_overlay_time = now
                     continue
+
+                if on_recognition_text is not None:
+                    # Final text is the only text sent to the active app. Clear
+                    # the overlay first so the visual preview does not look like
+                    # uncommitted text after the final paste happens.
+                    on_recognition_text("")
 
                 if not final_deduper.should_output(transcript):
                     logger.info("Skipped duplicate final transcript.")
@@ -148,5 +175,7 @@ def listen(
         logger.info("Listening session ended.")
         if idle_timer is not None:
             idle_timer.cancel()
+        if on_recognition_text is not None:
+            on_recognition_text("")
         if stream_context is not None:
             stream_context.__exit__(*sys.exc_info())
