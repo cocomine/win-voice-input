@@ -122,12 +122,15 @@ class ListeningIndicator:
     # active listening. It intentionally does not follow the text caret because
     # browser-rendered editors often draw their own caret and do not expose a
     # reliable Windows caret position.
+    # 420px is a fixed width for interim transcript feedback: it
+    # gives short Cantonese phrases room to be readable, while avoiding a
+    # dynamic window width that would make the overlay jump during recognition.
     WINDOW_WIDTH = 420
     WINDOW_HEIGHT = 64
     WORK_AREA_MARGIN_PX = 24
     TIMER_ID = 1
     # The timer polls slowly while hidden, then switches to roughly 60fps while
-    # visible. The fast cadence is required both for the 600ms enter/exit slide
+    # visible. The fast cadence is required both for the 100ms enter/exit slide
     # and for the listening halo's 1-second pulse loop.
     POLL_INTERVAL_MS = 120
     STARTUP_TIMEOUT_SECONDS = 5
@@ -170,6 +173,10 @@ class ListeningIndicator:
     CONTENT_COLOR = (*CONTENT_COLOR_RGB, 255)
     CONTENT_COLOR_HEX = "#{:02x}{:02x}{:02x}".format(*CONTENT_COLOR_RGB)
     FONT_ENV_VAR = "WIN_VOICE_INPUT_STATUS_FONT"
+    # Font priority is chosen for CJK coverage before Latin-only UI coverage:
+    # msjh.ttc is Microsoft JhengHei for Traditional Chinese, msyh.ttc is
+    # Microsoft YaHei for Simplified Chinese, mingliu.ttc is MingLiU for
+    # Traditional Chinese, and segoeui.ttf is the Latin/basic Windows UI font.
     FONT_FILE_NAMES = ("msjh.ttc", "msyh.ttc", "mingliu.ttc", "segoeui.ttf")
     FONT_SIZE = 14
 
@@ -264,14 +271,12 @@ class ListeningIndicator:
                     "or .ttc font file such as msjh.ttc."
                 )
             fonts_dir = Path(windows_dir) / "Fonts"
-            self._font_path = next(
-                (
-                    fonts_dir / font_file_name
-                    for font_file_name in self.FONT_FILE_NAMES
-                    if (fonts_dir / font_file_name).exists()
-                ),
-                fonts_dir / self.FONT_FILE_NAMES[0],
-            )
+            self._font_path = fonts_dir / self.FONT_FILE_NAMES[0]
+            for font_file_name in self.FONT_FILE_NAMES:
+                candidate_font_path = fonts_dir / font_file_name
+                if candidate_font_path.exists():
+                    self._font_path = candidate_font_path
+                    break
 
         if not self._font_path.exists():
             expected_fonts = ", ".join(self.FONT_FILE_NAMES)
@@ -614,10 +619,22 @@ class ListeningIndicator:
         if text_bbox[2] - text_bbox[0] > text_max_width:
             # The overlay is a status surface, not an editor. Long interim
             # transcripts are ellipsized so the bubble, border, and text never
-            # overlap while recognition keeps updating.
+            # overlap while recognition keeps updating. Binary search keeps the
+            # number of text measurements small even when Google returns a very
+            # long interim transcript.
             ellipsis = "..."
-            while display_text:
-                candidate_text = f"{display_text}{ellipsis}"
+            original_text = display_text
+            low = 0
+            high = len(original_text)
+            display_text = ellipsis
+            text_bbox = measure_draw.textbbox(
+                (0, 0),
+                display_text,
+                font=self._status_font,
+            )
+            while low <= high:
+                midpoint = (low + high) // 2
+                candidate_text = f"{original_text[:midpoint]}{ellipsis}"
                 candidate_bbox = measure_draw.textbbox(
                     (0, 0),
                     candidate_text,
@@ -626,15 +643,9 @@ class ListeningIndicator:
                 if candidate_bbox[2] - candidate_bbox[0] <= text_max_width:
                     display_text = candidate_text
                     text_bbox = candidate_bbox
-                    break
-                display_text = display_text[:-1]
-            if not display_text:
-                display_text = ellipsis
-                text_bbox = measure_draw.textbbox(
-                    (0, 0),
-                    display_text,
-                    font=self._status_font,
-                )
+                    low = midpoint + 1
+                else:
+                    high = midpoint - 1
 
         # The content remains left-aligned so the overlay behaves like a compact
         # status panel. Only vertical centering is dynamic; horizontal centering

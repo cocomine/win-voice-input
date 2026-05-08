@@ -12,6 +12,9 @@ from text_processing import FinalTranscriptDeduper, prepare_text
 from windows_text_output import WindowsTextOutput
 
 logger = logging.getLogger(__name__)
+# Google can emit several interim revisions per second. Updating the overlay
+# about three times per second is fast enough to feel live, while leaving time
+# for Pillow/Win32 redraw work so long Cantonese transcripts do not churn the UI.
 INTERIM_OVERLAY_MIN_INTERVAL_SECONDS = 0.35
 RecognitionTextCallback = Callable[[str], None]
 
