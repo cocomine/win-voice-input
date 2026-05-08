@@ -1,5 +1,6 @@
 import ctypes
 import logging
+import math
 import os
 import sys
 import threading
@@ -125,9 +126,9 @@ class ListeningIndicator:
     WINDOW_HEIGHT = 56
     WORK_AREA_MARGIN_PX = 24
     TIMER_ID = 1
-    # The timer polls slowly while idle, then switches to roughly 60fps during
-    # animation. This keeps normal CPU wakeups low without making the 100ms
-    # fade-and-slide transition look stepped.
+    # The timer polls slowly while hidden, then switches to roughly 60fps while
+    # visible. The fast cadence is required both for the 100ms enter/exit slide
+    # and for the listening halo's 1-second pulse loop.
     POLL_INTERVAL_MS = 120
     STARTUP_TIMEOUT_SECONDS = 5
     SHUTDOWN_TIMEOUT_SECONDS = 2
@@ -139,6 +140,7 @@ class ListeningIndicator:
     ANIMATION_DURATION_MS = 100
     ANIMATION_FRAME_INTERVAL_MS = 16
     ANIMATION_OFFSET_PX = 18
+    HALO_PULSE_DURATION_MS = 1000
 
     # Pillow draws the status artwork at a higher resolution and downsamples it
     # before Windows displays it as a layered bitmap. mic.svg is used for the
@@ -150,6 +152,13 @@ class ListeningIndicator:
     PANEL_BORDER_COLOR = (83, 95, 107, 255)
     BUBBLE_FILL_COLOR = (10, 132, 255, 255)
     BUBBLE_OUTLINE_COLOR = (125, 197, 255, 255)
+    # The halo is a solid translucent ring, not a radial gradient. Its radius
+    # changes over time while the color stays constant, which keeps the visual
+    # cue simple and avoids introducing another rendering framework.
+    HALO_COLOR = (10, 132, 255, 96)
+    HALO_MIN_RADIUS = 20
+    HALO_MAX_RADIUS = 24
+    HALO_WIDTH = 3
     CONTENT_COLOR_RGB = (255, 255, 255)
     CONTENT_COLOR = (*CONTENT_COLOR_RGB, 255)
     CONTENT_COLOR_HEX = "#{:02x}{:02x}{:02x}".format(*CONTENT_COLOR_RGB)
@@ -200,6 +209,7 @@ class ListeningIndicator:
         self._thread_id: int | None = None
         self._memory_dc: int | None = None
         self._bitmap: int | None = None
+        self._bitmap_bits: int | None = None
         self._old_bitmap: int | None = None
         # Animation is tracked as a small state machine. _visible_fraction is
         # the current rendered progress where 0 means fully hidden and 1 means
@@ -216,6 +226,9 @@ class ListeningIndicator:
         self._asset_dir: Path
         self._font_path: Path
         self._mic_icon_image: Image.Image
+        self._status_font: ImageFont.FreeTypeFont
+        self._status_base_image: Image.Image | None = None
+        self._status_foreground_image: Image.Image | None = None
         self._class_name = f"{self.CLASS_NAME}{id(self)}"
         self._window_procedure = WindowProcedure(self._handle_window_message)
 
@@ -240,6 +253,10 @@ class ListeningIndicator:
                 f"Verify Windows Fonts contains {self.FONT_FILE_NAME}, or set "
                 f"{self.FONT_ENV_VAR} to a readable .ttf font file."
             )
+        self._status_font = ImageFont.truetype(
+            str(self._font_path),
+            self.FONT_SIZE * self.RENDER_SCALE,
+        )
 
         mic_svg_path = self._asset_dir / "mic.svg"
         try:
@@ -501,8 +518,8 @@ class ListeningIndicator:
         if self._hwnd is None or self._timer_interval_ms == interval_ms:
             return
         # SetTimer with the same timer id updates the existing timer period.
-        # The window can therefore render smooth animation frames only while a
-        # transition is active, then return to a slower polling cadence.
+        # The window can therefore render smooth frames while an animation or
+        # halo pulse is active, then return to a slower hidden polling cadence.
         if not self._user32.SetTimer(
             self._hwnd,
             self.TIMER_ID,
@@ -512,44 +529,83 @@ class ListeningIndicator:
             raise ctypes.WinError()
         self._timer_interval_ms = interval_ms
 
-    def _render_status_image(self) -> Image.Image:
+    def _render_status_image(self, halo_fraction: float) -> Image.Image:
         scale = self.RENDER_SCALE
         width = self.WINDOW_WIDTH * scale
         height = self.WINDOW_HEIGHT * scale
-        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+
+        if self._status_base_image is None or self._status_foreground_image is None:
+            # Only the halo changes every timer frame. The panel, microphone
+            # bubble, SVG icon, and text are cached at render scale so the
+            # visible 60fps pulse does not repeatedly redraw static artwork.
+            base_image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            base_draw = ImageDraw.Draw(base_image)
+            base_draw.rounded_rectangle(
+                (scale, scale, width - scale, height - scale),
+                radius=8 * scale,
+                fill=self.PANEL_FILL_COLOR,
+                outline=self.PANEL_BORDER_COLOR,
+                width=scale,
+            )
+
+            foreground_image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            foreground_draw = ImageDraw.Draw(foreground_image)
+            foreground_draw.ellipse(
+                (16 * scale, 11 * scale, 50 * scale, 45 * scale),
+                fill=self.BUBBLE_FILL_COLOR,
+                outline=self.BUBBLE_OUTLINE_COLOR,
+                width=2 * scale,
+            )
+
+            mic_left = (33 * scale) - (self._mic_icon_image.width // 2)
+            mic_top = (28 * scale) - (self._mic_icon_image.height // 2)
+            foreground_image.alpha_composite(
+                self._mic_icon_image,
+                (mic_left, mic_top),
+            )
+
+            text_bbox = foreground_draw.textbbox(
+                (0, 0),
+                self.STATUS_TEXT,
+                font=self._status_font,
+            )
+            text_height = text_bbox[3] - text_bbox[1]
+            text_y = ((self.WINDOW_HEIGHT * scale) - text_height) // 2 - text_bbox[1]
+            foreground_draw.text(
+                (64 * scale, text_y),
+                self.STATUS_TEXT,
+                fill=self.CONTENT_COLOR,
+                font=self._status_font,
+            )
+            self._status_base_image = base_image
+            self._status_foreground_image = foreground_image
+
+        image = self._status_base_image.copy()
         draw = ImageDraw.Draw(image)
-
-        draw.rounded_rectangle(
-            (scale, scale, width - scale, height - scale),
-            radius=8 * scale,
-            fill=self.PANEL_FILL_COLOR,
-            outline=self.PANEL_BORDER_COLOR,
-            width=scale,
+        halo_radius = round(
+            (
+                self.HALO_MIN_RADIUS
+                + ((self.HALO_MAX_RADIUS - self.HALO_MIN_RADIUS) * halo_fraction)
+            )
+            * scale
         )
+        halo_center_x = 33 * scale
+        halo_center_y = 28 * scale
+        # The halo is drawn before the blue microphone bubble so only the
+        # outside ring remains visible. The pulse fraction comes from a
+        # 1-second clock loop; it changes radius only, with no gradient or color
+        # fade, matching the requested visual style.
         draw.ellipse(
-            (16 * scale, 11 * scale, 50 * scale, 45 * scale),
-            fill=self.BUBBLE_FILL_COLOR,
-            outline=self.BUBBLE_OUTLINE_COLOR,
-            width=2 * scale,
+            (
+                halo_center_x - halo_radius,
+                halo_center_y - halo_radius,
+                halo_center_x + halo_radius,
+                halo_center_y + halo_radius,
+            ),
+            outline=self.HALO_COLOR,
+            width=self.HALO_WIDTH * scale,
         )
-
-        mic_left = (33 * scale) - (self._mic_icon_image.width // 2)
-        mic_top = (28 * scale) - (self._mic_icon_image.height // 2)
-        image.alpha_composite(
-            self._mic_icon_image,
-            (mic_left, mic_top),
-        )
-
-        font = ImageFont.truetype(str(self._font_path), self.FONT_SIZE * scale)
-        text_bbox = draw.textbbox((0, 0), self.STATUS_TEXT, font=font)
-        text_height = text_bbox[3] - text_bbox[1]
-        text_y = ((self.WINDOW_HEIGHT * scale) - text_height) // 2 - text_bbox[1]
-        draw.text(
-            (64 * scale, text_y),
-            self.STATUS_TEXT,
-            fill=self.CONTENT_COLOR,
-            font=font,
-        )
+        image.alpha_composite(self._status_foreground_image)
 
         return image.resize(
             (self.WINDOW_WIDTH, self.WINDOW_HEIGHT),
@@ -557,7 +613,7 @@ class ListeningIndicator:
         )
 
     def _create_status_bitmap(self) -> None:
-        image = self._render_status_image().convert("RGBA")
+        image = self._render_status_image(0.0).convert("RGBA")
         bitmap_bytes = self._to_premultiplied_bgra(image)
 
         bitmap_info = BITMAPINFO()
@@ -582,7 +638,8 @@ class ListeningIndicator:
         if not self._bitmap or not bits.value:
             raise ctypes.WinError()
 
-        ctypes.memmove(bits, bitmap_bytes, len(bitmap_bytes))
+        self._bitmap_bits = bits.value
+        ctypes.memmove(self._bitmap_bits, bitmap_bytes, len(bitmap_bytes))
         self._memory_dc = self._gdi32.CreateCompatibleDC(None)
         if not self._memory_dc:
             raise ctypes.WinError()
@@ -597,6 +654,7 @@ class ListeningIndicator:
             self._gdi32.DeleteDC(self._memory_dc)
         self._memory_dc = None
         self._bitmap = None
+        self._bitmap_bits = None
         self._old_bitmap = None
 
     def _to_premultiplied_bgra(self, image: Image.Image) -> bytes:
@@ -649,9 +707,14 @@ class ListeningIndicator:
             if progress >= 1.0:
                 self._visible_fraction = self._animation_target_fraction
                 self._animation_start_time_ms = None
-                self._set_timer_interval(self.POLL_INTERVAL_MS)
+                if self._visible_fraction > 0.0:
+                    self._set_timer_interval(self.ANIMATION_FRAME_INTERVAL_MS)
+                else:
+                    self._set_timer_interval(self.POLL_INTERVAL_MS)
         else:
             self._visible_fraction = desired_fraction
+            if self._visible_fraction > 0.0:
+                self._set_timer_interval(self.ANIMATION_FRAME_INTERVAL_MS)
 
         if self._visible_fraction <= 0.0:
             self._user32.ShowWindow(self._hwnd, self.SW_HIDE)
@@ -694,6 +757,17 @@ class ListeningIndicator:
             * (1.0 - self._visible_fraction)
         )
         alpha = round(255 * self._visible_fraction)
+
+        if self._bitmap_bits is None:
+            raise RuntimeError("Listening indicator bitmap is not ready.")
+        halo_phase = (
+            now_ms % self.HALO_PULSE_DURATION_MS
+        ) / self.HALO_PULSE_DURATION_MS
+        halo_fraction = 0.5 - (math.cos(halo_phase * math.tau) * 0.5)
+        bitmap_bytes = self._to_premultiplied_bgra(
+            self._render_status_image(halo_fraction).convert("RGBA")
+        )
+        ctypes.memmove(self._bitmap_bits, bitmap_bytes, len(bitmap_bytes))
 
         self._show_layered_window(x, y + slide_offset, alpha)
 
