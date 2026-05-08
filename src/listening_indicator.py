@@ -147,9 +147,9 @@ class ListeningIndicator:
     ANIMATION_FRAME_INTERVAL_MS = 16
     ANIMATION_OFFSET_PX = 18
     HALO_PULSE_DURATION_MS = 1000
-    # One second at a 16ms timer cadence is about 60 frames. Pre-rendering this
-    # many halo frames keeps the pulse smooth while avoiding per-frame Pillow
-    # drawing, resizing, and BGRA conversion during normal listening.
+    # One second at a 16ms timer cadence is about 60 frames. Halo frames are
+    # cached lazily instead of rebuilt all at once when interim text changes,
+    # because Google may update recognition text several times per second.
     HALO_FRAME_COUNT = 60
 
     # Pillow draws the status artwork at a higher resolution and downsamples it
@@ -225,8 +225,8 @@ class ListeningIndicator:
         self._memory_dc: int | None = None
         self._bitmap: int | None = None
         # CreateDIBSection returns a raw memory address. Keeping the pointer
-        # lets the timer copy pre-rendered BGRA frames into the same bitmap
-        # instead of allocating GDI resources for every halo pulse frame.
+        # lets the timer copy cached BGRA frames into the same bitmap instead
+        # of allocating GDI resources for every halo pulse frame.
         self._bitmap_bits_ptr: int | None = None
         self._old_bitmap: int | None = None
         # Animation is tracked as a small state machine. _visible_fraction is
@@ -247,7 +247,7 @@ class ListeningIndicator:
         self._status_font: ImageFont.FreeTypeFont
         self._status_base_image: Image.Image | None = None
         self._status_foreground_image: Image.Image | None = None
-        self._halo_bitmap_frames: list[bytes] | None = None
+        self._halo_bitmap_frames: dict[int, bytes] = {}
         # Dictation callbacks run on the recognition worker thread, while the
         # layered window must redraw on its own Win32 message thread. The
         # pending/display split lets set_text() stay thread-safe and keeps all
@@ -579,12 +579,12 @@ class ListeningIndicator:
             return
 
         # Only the text layer changes when Google sends a new interim result.
-        # Clearing the cached artwork and rebuilding the pre-rendered halo
-        # frames keeps the normal timer path allocation-free between updates.
+        # Clearing the lazy bitmap cache avoids showing old text while also
+        # avoiding a blocking rebuild of all 60 halo frames on the UI thread.
         self._display_text = pending_text
         self._status_base_image = None
         self._status_foreground_image = None
-        self._halo_bitmap_frames = self._build_halo_bitmap_frames()
+        self._halo_bitmap_frames.clear()
 
     def _render_status_image(self, halo_fraction: float) -> Image.Image:
         """Render one status image.
@@ -600,62 +600,66 @@ class ListeningIndicator:
         icon_bubble_size = self.ICON_BUBBLE_SIZE_PX * scale
         icon_text_gap = self.ICON_TEXT_GAP_PX * scale
 
-        display_text = self._display_text or self.STATUS_TEXT
-        text_max_width = (
-            self.WINDOW_WIDTH
-            - (self.CONTENT_SIDE_PADDING_PX * 2)
-            - self.ICON_BUBBLE_SIZE_PX
-            - self.ICON_TEXT_GAP_PX
-        ) * scale
-        # A tiny measuring surface is enough for textbbox. Keeping measurement
-        # outside the drawing cache means the same computed content positions
-        # can drive both the static foreground and the animated halo center.
-        measure_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1), (0, 0, 0, 0)))
-        text_bbox = measure_draw.textbbox(
-            (0, 0),
-            display_text,
-            font=self._status_font,
-        )
-        if text_bbox[2] - text_bbox[0] > text_max_width:
-            # The overlay is a status surface, not an editor. Long interim
-            # transcripts use a leading ellipsis so the newest recognized words
-            # remain visible. Binary search keeps the number of text
-            # measurements small even when Google returns a very long interim
-            # transcript.
-            ellipsis = "..."
-            original_text = display_text
-            display_text = ellipsis
+        if self._status_base_image is None or self._status_foreground_image is None:
+            display_text = self._display_text or self.STATUS_TEXT
+            text_max_width = (
+                self.WINDOW_WIDTH
+                - (self.CONTENT_SIDE_PADDING_PX * 2)
+                - self.ICON_BUBBLE_SIZE_PX
+                - self.ICON_TEXT_GAP_PX
+            ) * scale
+            # A tiny measuring surface is enough for textbbox. Measurement only
+            # runs when the foreground text changes; cached halo frames can then
+            # reuse the same rendered text until Google sends a new transcript.
+            measure_draw = ImageDraw.Draw(
+                Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+            )
             text_bbox = measure_draw.textbbox(
                 (0, 0),
                 display_text,
                 font=self._status_font,
             )
             if text_bbox[2] - text_bbox[0] > text_max_width:
-                # This should not happen with the current overlay dimensions,
-                # but keeping the edge case explicit prevents a future narrower
-                # layout from rendering text outside the panel.
-                display_text = ""
-                text_bbox = (0, 0, 0, 0)
-            else:
-                # Suffix length zero means "..." only, which was measured
-                # above. Start at one so the search still includes the
-                # one-character suffix without re-testing the same ellipsis.
-                low = 1
-                high = len(original_text)
-                while low <= high:
-                    midpoint = (low + high) // 2
-                    candidate_text = f"{ellipsis}{original_text[-midpoint:]}"
-                    candidate_bbox = measure_draw.textbbox(
-                        (0, 0),
-                        candidate_text,
-                        font=self._status_font,
-                    )
-                    if candidate_bbox[2] - candidate_bbox[0] <= text_max_width:
-                        display_text = candidate_text
-                        text_bbox = candidate_bbox
-                        low = midpoint + 1
-                    else:
-                        high = midpoint - 1
+                # The overlay is a status surface, not an editor. Long interim
+                # transcripts use a leading ellipsis so the newest recognized
+                # words remain visible. Binary search keeps the number of text
+                # measurements small even when Google returns a very long
+                # interim transcript.
+                ellipsis = "..."
+                original_text = display_text
+                display_text = ellipsis
+                text_bbox = measure_draw.textbbox(
+                    (0, 0),
+                    display_text,
+                    font=self._status_font,
+                )
+                if text_bbox[2] - text_bbox[0] > text_max_width:
+                    # This should not happen with the current overlay
+                    # dimensions, but keeping the edge case explicit prevents a
+                    # future narrower layout from rendering text outside the
+                    # panel.
+                    display_text = ""
+                    text_bbox = (0, 0, 0, 0)
+                else:
+                    # Suffix length zero means "..." only, which was measured
+                    # above. Start at one so the search still includes the
+                    # one-character suffix without re-testing the same ellipsis.
+                    low = 1
+                    high = len(original_text)
+                    while low <= high:
+                        midpoint = (low + high) // 2
+                        candidate_text = f"{ellipsis}{original_text[-midpoint:]}"
+                        candidate_bbox = measure_draw.textbbox(
+                            (0, 0),
+                            candidate_text,
+                            font=self._status_font,
+                        )
+                        if candidate_bbox[2] - candidate_bbox[0] <= text_max_width:
+                            display_text = candidate_text
+                            text_bbox = candidate_bbox
+                            low = midpoint + 1
+                        else:
+                            high = midpoint - 1
 
         # The content remains left-aligned so the overlay behaves like a compact
         # status panel. Only vertical centering is dynamic; horizontal centering
@@ -741,24 +745,19 @@ class ListeningIndicator:
             Image.Resampling.LANCZOS,
         )
 
-    def _build_halo_bitmap_frames(self) -> list[bytes]:
-        halo_bitmap_frames = []
-        for frame_index in range(self.HALO_FRAME_COUNT):
-            halo_phase = frame_index / self.HALO_FRAME_COUNT
-            # cos() normally produces -1..1. This expression normalizes one
-            # full tau cycle to a 0..1..0 radius curve, giving the halo a smooth
-            # expand-and-shrink pulse without changing its color or opacity.
-            halo_fraction = 0.5 - (cos(halo_phase * tau) * 0.5)
-            halo_bitmap_frames.append(
-                self._to_premultiplied_bgra(
-                    self._render_status_image(halo_fraction).convert("RGBA")
-                )
-            )
-        return halo_bitmap_frames
+    def _render_halo_bitmap_frame(self, frame_index: int) -> bytes:
+        halo_phase = frame_index / self.HALO_FRAME_COUNT
+        # cos() normally produces -1..1. This expression normalizes one full tau
+        # cycle to a 0..1..0 radius curve, giving the halo a smooth
+        # expand-and-shrink pulse without changing its color or opacity.
+        halo_fraction = 0.5 - (cos(halo_phase * tau) * 0.5)
+        return self._to_premultiplied_bgra(
+            self._render_status_image(halo_fraction).convert("RGBA")
+        )
 
     def _create_status_bitmap(self) -> None:
-        self._halo_bitmap_frames = self._build_halo_bitmap_frames()
-        bitmap_bytes = self._halo_bitmap_frames[0]
+        bitmap_bytes = self._render_halo_bitmap_frame(0)
+        self._halo_bitmap_frames[0] = bitmap_bytes
 
         bitmap_info = BITMAPINFO()
         bitmap_info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
@@ -909,7 +908,7 @@ class ListeningIndicator:
         )
         alpha = round(255 * self._visible_fraction)
 
-        if self._bitmap_bits_ptr is None or self._halo_bitmap_frames is None:
+        if self._bitmap_bits_ptr is None:
             raise RuntimeError("Listening indicator bitmap is not ready.")
         halo_phase = (
             now_ms % self.HALO_PULSE_DURATION_MS
@@ -917,7 +916,13 @@ class ListeningIndicator:
         halo_frame_index = (
             int(halo_phase * self.HALO_FRAME_COUNT) % self.HALO_FRAME_COUNT
         )
-        bitmap_bytes = self._halo_bitmap_frames[halo_frame_index]
+        bitmap_bytes = self._halo_bitmap_frames.get(halo_frame_index)
+        if bitmap_bytes is None:
+            # Text changes invalidate the final bitmap cache. Regenerating only
+            # the frame required for this timer tick keeps the overlay
+            # responsive even when interim recognition updates arrive quickly.
+            bitmap_bytes = self._render_halo_bitmap_frame(halo_frame_index)
+            self._halo_bitmap_frames[halo_frame_index] = bitmap_bytes
         ctypes.memmove(self._bitmap_bits_ptr, bitmap_bytes, len(bitmap_bytes))
 
         self._show_layered_window(x, y + slide_offset, alpha)
