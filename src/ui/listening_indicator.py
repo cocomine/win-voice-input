@@ -366,9 +366,14 @@ class ListeningIndicator:
             )
 
     def show(self) -> None:
+        # show() can be called from tray or recognition callback threads. It
+        # only flips an event; the Win32 thread reads that event and performs
+        # the actual layered-window update safely inside its message loop.
         self._visible_event.set()
 
     def hide(self) -> None:
+        # Hiding uses the same event-driven path as showing so exit animation,
+        # alpha, and timer cadence stay centralized in _update_window().
         self._visible_event.clear()
 
     def set_text(self, text: str) -> None:
@@ -393,6 +398,9 @@ class ListeningIndicator:
     def _run_window(self) -> None:
         self._thread_id = self._kernel32.GetCurrentThreadId()
         try:
+            # The indicator owns a private message-only style loop because
+            # layered windows must be created and updated from a thread that can
+            # receive timer and destroy messages.
             instance = self._kernel32.GetModuleHandleW(None)
             window_class = WNDCLASSEXW()
             window_class.cbSize = ctypes.sizeof(WNDCLASSEXW)
@@ -468,6 +476,9 @@ class ListeningIndicator:
         w_param: int,
         l_param: int,
     ) -> int:
+        # The timer is the rendering heartbeat. It handles both smooth visual
+        # animation and low-frequency hidden polling, while all other messages
+        # are delegated back to DefWindowProcW.
         if message == self.WM_TIMER:
             try:
                 self._update_window()
@@ -680,6 +691,9 @@ class ListeningIndicator:
         )
 
     def _create_status_bitmap(self) -> None:
+        # One DIB section is created for the overlay lifetime and reused by
+        # copying new BGRA frame bytes into its memory. Reusing the bitmap keeps
+        # GDI object churn low during the 60fps halo pulse.
         bitmap_bytes = self._render_halo_bitmap_frame(0)
         self._halo_bitmap_frames[0] = bitmap_bytes
 
@@ -713,6 +727,8 @@ class ListeningIndicator:
         self._old_bitmap = self._gdi32.SelectObject(self._memory_dc, self._bitmap)
 
     def _destroy_status_bitmap(self) -> None:
+        # GDI objects must be restored and deleted in reverse ownership order:
+        # select the old bitmap back first, then delete our bitmap and memory DC.
         if self._memory_dc is not None and self._old_bitmap is not None:
             self._gdi32.SelectObject(self._memory_dc, self._old_bitmap)
         if self._bitmap is not None:
@@ -852,6 +868,9 @@ class ListeningIndicator:
         self._show_layered_window(x, y + slide_offset, alpha)
 
     def _show_layered_window(self, x: int, y: int, alpha: int) -> None:
+        # UpdateLayeredWindow atomically moves the no-activate overlay and swaps
+        # its per-pixel alpha bitmap. This avoids flicker while keeping focus in
+        # the user's active editor.
         if self._hwnd is None or self._memory_dc is None:
             return
 

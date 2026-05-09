@@ -16,6 +16,9 @@ from config.dictation_settings import DictationSettings
 from config.feedback_settings import FeedbackSettings
 from config.paths import get_asset_dir
 
+# Most runtime modules import from config directly. Re-exporting the small
+# public settings surface here keeps those modules independent from the physical
+# file split that was introduced for easier code review.
 __all__ = [
     "ALLOWED_LISTENING_INDICATOR_POSITIONS",
     "ASSETS_DIR_NAME",

@@ -1,6 +1,8 @@
 import ctypes
 
 
+# MessageBoxW flag constants are kept beside the wrapper so startup code can
+# request OK-only or Yes/No dialogs without importing a richer UI framework.
 MESSAGE_BOX_ICON_ERROR = 0x00000010
 MESSAGE_BOX_OK = 0x00000000
 MESSAGE_BOX_YES_NO = 0x00000004
