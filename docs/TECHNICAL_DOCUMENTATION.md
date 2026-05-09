@@ -488,3 +488,125 @@ PyInstaller 使用 `WinVoiceInput.spec`：
 - Interim transcript 不寫入輸入框，因為 Google interim result 會反覆修正，寫入輸入框會造成重複、刪除和 IME 兼容問題。
 - Final output 使用 clipboard + Ctrl+V，而不是逐字 key input，因為中文 Unicode 文字在不同輸入法狀態下逐字送鍵較不穩定。
 - Settings editor 儲存後重新啟動主程式，避免 runtime object 在半途中熱更新設定而造成 tray、hotkey、overlay、Google stream 狀態不一致。
+
+## 13. 開發者 Setup / Run / Build
+
+本節保留開發者工作流程。README 只面向普通使用者和已編譯 exe 的使用方式。
+
+### 13.1 Runtime Setup
+
+1. 安裝 Python 3.11 或更新版本。
+2. 建立或選擇 Google Cloud project。
+3. 啟用 Cloud Speech-to-Text API。
+4. 建立 service account key JSON 檔案。
+5. 在 PowerShell 指定 Google auth：
+
+```powershell
+$env:GOOGLE_APPLICATION_CREDENTIALS="D:\path\to\service-account.json"
+```
+
+6. 安裝 runtime dependencies：
+
+```powershell
+pip install -r requirements.txt
+```
+
+### 13.2 Project Layout
+
+- `src\voice_input.py`：Python entry point，source run 和 PyInstaller 都使用它。
+- `src\audio\`、`src\config\`、`src\dictation\`、`src\output\`、`src\ui\`、`src\win32_types\`：按職責拆分的 source packages。
+- `assets\`：必要資源，包括 `mic.svg`、`mic-mute.svg`、`start.mp3`、`end.mp3`。
+- `run-dictation.ps1`、`list-devices.ps1`、`build.ps1`：根目錄 PowerShell scripts。
+- `config.example.json`：本機設定範本。
+- `requirements.txt`：runtime dependency list。
+- `requirements-build.txt`：build-only dependency list。
+
+### 13.3 Source Run
+
+日常 source run：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1
+```
+
+指定 credentials：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json"
+```
+
+列出 microphones：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\list-devices.ps1
+```
+
+指定 microphone：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -Device 1
+```
+
+指定語言：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -Language en-US
+```
+
+Console-only mode：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -ConsoleOnly
+```
+
+不使用 tray：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -NoTray
+```
+
+不使用 tray 或 global hotkey，啟動後立即聆聽：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -NoTray -NoHotkey
+```
+
+修改 idle timeout：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -IdleTimeoutSeconds 8
+```
+
+啟用 command words 測試：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -EnableCommandWords
+```
+
+### 13.4 Build Windows Exe
+
+安裝 build-only dependency：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+```
+
+建立測試 package：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+```
+
+輸出位置：
+
+```text
+dist\WinVoiceInput\WinVoiceInput.exe
+```
+
+預設 build 會保留 console window，方便測試 startup error、microphone 選擇和 Google authentication 訊息。穩定後可建立 windowed build：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build.ps1 -Windowed
+```
+
+Packaged exe 會從 `WinVoiceInput.exe` 同一 folder 讀取 `config.json`，所以正式分發時需要把 `config.json` 放在 `dist\WinVoiceInput` 內或由首次啟動 Settings 建立。
