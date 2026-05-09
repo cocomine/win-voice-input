@@ -243,3 +243,4 @@ cython_debug/
 
 /eveapp-320519-17a1cbb68e48.json
 config.json
+!/WinVoiceInput.spec
