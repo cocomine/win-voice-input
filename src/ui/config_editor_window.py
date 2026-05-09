@@ -56,7 +56,7 @@ class ConfigEditorWindow:
         startup_command_parts = [str(Path(sys.executable).resolve())]
         if not getattr(sys, "frozen", False):
             startup_command_parts.append(
-                str(Path(__file__).resolve().parent / "voice_input.py")
+                str(Path(__file__).resolve().parent.parent / "voice_input.py")
             )
         startup_command_parts.extend(["--config", str(self.config_path)])
         self.startup_command = subprocess.list2cmdline(startup_command_parts)
