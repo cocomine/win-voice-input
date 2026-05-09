@@ -21,6 +21,7 @@ from config import (
 )
 from win32_types import (
     BITMAPINFO,
+    BITMAPINFOHEADER,
     BLENDFUNCTION,
     LRESULT,
     MSG,
