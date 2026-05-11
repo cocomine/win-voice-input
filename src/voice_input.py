@@ -18,6 +18,7 @@ from config import (
     DEFAULT_IDLE_TIMEOUT_SECONDS,
     DEFAULT_LANGUAGE,
     DEFAULT_LISTENING_INDICATOR_POSITION,
+    DEFAULT_PASTE_PREVIEW_ON_SESSION_END,
     DEFAULT_PLAY_STATUS_SOUNDS,
     DEFAULT_RATE,
     DEFAULT_SHOW_LISTENING_INDICATOR,
@@ -106,6 +107,22 @@ def main() -> int:
         help="Do not paste final transcripts into the active app.",
     )
     parser.add_argument(
+        "--paste-preview-on-session-end",
+        dest="paste_preview_on_session_end",
+        action="store_true",
+        default=None,
+        help=(
+            "Paste the latest non-final preview if the listening session ends "
+            "before Google returns a final transcript."
+        ),
+    )
+    parser.add_argument(
+        "--no-paste-preview-on-session-end",
+        dest="paste_preview_on_session_end",
+        action="store_false",
+        help="Do not paste pending preview text when a listening session ends.",
+    )
+    parser.add_argument(
         "--hotkey",
         dest="hotkey",
         action="store_true",
@@ -187,6 +204,7 @@ def main() -> int:
     # exe use, where config.json should control daily behavior.
     parser.set_defaults(
         paste_final=None,
+        paste_preview_on_session_end=None,
         hotkey=None,
         tray=None,
         command_words=None,
@@ -380,6 +398,7 @@ def main() -> int:
         "rate": DEFAULT_RATE,
         "chunk_ms": DEFAULT_CHUNK_MS,
         "paste_final": True,
+        "paste_preview_on_session_end": DEFAULT_PASTE_PREVIEW_ON_SESSION_END,
         "tray": True,
         "hotkey": True,
         "command_words": False,
@@ -420,6 +439,7 @@ def main() -> int:
             "rate": "rate",
             "chunkMs": "chunk_ms",
             "pasteFinal": "paste_final",
+            "pastePreviewOnSessionEnd": "paste_preview_on_session_end",
             "tray": "tray",
             "hotkey": "hotkey",
             "commandWords": "command_words",
@@ -516,6 +536,10 @@ def main() -> int:
         settings["device"] = args.device
     if args.paste_final is not None:
         settings["paste_final"] = args.paste_final
+    if args.paste_preview_on_session_end is not None:
+        settings["paste_preview_on_session_end"] = (
+            args.paste_preview_on_session_end
+        )
     if args.tray is not None:
         settings["tray"] = args.tray
     if args.hotkey is not None:
@@ -568,6 +592,9 @@ def main() -> int:
     )
     dictation_settings = DictationSettings(
         paste_final=bool(settings["paste_final"]),
+        paste_preview_on_session_end=bool(
+            settings["paste_preview_on_session_end"]
+        ),
         command_words=bool(settings["command_words"]),
         append_space=bool(settings["append_space"]),
         final_dedupe_seconds=float(settings["final_dedupe_seconds"]),

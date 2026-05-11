@@ -4,6 +4,7 @@
   "language": "yue-Hant-HK",
   "rate": 16000,
   "pasteFinal": true,
+  "pastePreviewOnSessionEnd": false,
   "tray": true,
   "hotkey": true,
   "commandWords": false,

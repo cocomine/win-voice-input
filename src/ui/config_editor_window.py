@@ -15,6 +15,7 @@ from config import (
     DEFAULT_IDLE_TIMEOUT_SECONDS,
     DEFAULT_LANGUAGE,
     DEFAULT_LISTENING_INDICATOR_POSITION,
+    DEFAULT_PASTE_PREVIEW_ON_SESSION_END,
     DEFAULT_PLAY_STATUS_SOUNDS,
     DEFAULT_RATE,
     DEFAULT_SHOW_LISTENING_INDICATOR,
@@ -94,6 +95,11 @@ class ConfigEditorWindow:
 
         self.paste_final_check = QCheckBox("Paste final transcripts")
         form.addRow("", self.paste_final_check)
+
+        self.paste_preview_on_session_end_check = QCheckBox(
+            "Paste preview when session ends without final"
+        )
+        form.addRow("", self.paste_preview_on_session_end_check)
 
         self.append_space_check = QCheckBox("Append space after final text")
         form.addRow("", self.append_space_check)
@@ -220,6 +226,14 @@ class ConfigEditorWindow:
         self.language_edit.setText(str(self.config_data.get("language", DEFAULT_LANGUAGE)))
         self.rate_spin.setValue(int(self.config_data.get("rate", DEFAULT_RATE)))
         self.paste_final_check.setChecked(bool(self.config_data.get("pasteFinal", True)))
+        self.paste_preview_on_session_end_check.setChecked(
+            bool(
+                self.config_data.get(
+                    "pastePreviewOnSessionEnd",
+                    DEFAULT_PASTE_PREVIEW_ON_SESSION_END,
+                )
+            )
+        )
         self.append_space_check.setChecked(bool(self.config_data.get("appendSpace", False)))
         self.command_words_check.setChecked(bool(self.config_data.get("commandWords", False)))
         self.final_dedupe_spin.setValue(
@@ -415,6 +429,13 @@ class ConfigEditorWindow:
         self.config_data["language"] = self.language_edit.text().strip() or DEFAULT_LANGUAGE
         self.config_data["rate"] = int(self.rate_spin.value())
         self.config_data["pasteFinal"] = self.paste_final_check.isChecked()
+        # This opt-in is separate from pasteFinal because it commits Google's
+        # latest non-final preview only at the session boundary. Keeping it as
+        # an explicit setting lets users choose whether short utterances should
+        # be salvaged when Google never emits final.
+        self.config_data["pastePreviewOnSessionEnd"] = (
+            self.paste_preview_on_session_end_check.isChecked()
+        )
         # Tray and hotkey are operational launch-mode settings. The first
         # settings window focuses on daily dictation preferences, so it
         # preserves these existing values instead of exposing controls that
