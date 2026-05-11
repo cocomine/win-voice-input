@@ -592,6 +592,11 @@ def main() -> int:
     )
     dictation_settings = DictationSettings(
         paste_final=bool(settings["paste_final"]),
+        # paste_final controls normal Google final commits during the live
+        # stream. paste_preview_on_session_end is intentionally separate: it
+        # only salvages the latest non-final preview after the session is
+        # already ending, so users can enable short-utterance recovery without
+        # changing whether normal final transcripts are pasted.
         paste_preview_on_session_end=bool(
             settings["paste_preview_on_session_end"]
         ),
