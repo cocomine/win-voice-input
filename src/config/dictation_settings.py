@@ -7,6 +7,7 @@ class DictationSettings:
     # the microphone. Keeping them separate from AudioSettings makes review
     # easier when tuning paste, command-word, or timeout behavior.
     paste_final: bool
+    paste_preview_on_session_end: bool
     command_words: bool
     append_space: bool
     final_dedupe_seconds: float

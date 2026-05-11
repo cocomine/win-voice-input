@@ -64,21 +64,71 @@ def listen(
         single_utterance=False,
     )
 
-    if dictation_settings.paste_final:
-        # WindowsTextOutput is created only when paste mode is enabled. Console
-        # mode should remain read-only and must not touch clipboard or keyboard
-        # state.
-        logger.info("Listening session started with paste mode enabled.")
-        print("Listening and pasting final text. Press Ctrl+C to stop.\n")
+    output_enabled = (
+        dictation_settings.paste_final
+        or dictation_settings.paste_preview_on_session_end
+    )
+    if output_enabled:
+        # WindowsTextOutput is created only when at least one paste path is
+        # enabled. Read-only console mode must not touch clipboard or keyboard
+        # state, while session-end preview paste needs the same Windows output
+        # object even if normal final paste is disabled.
+        logger.info(
+            "Listening session started with output enabled: "
+            "paste_final=%s paste_preview_on_session_end=%s.",
+            dictation_settings.paste_final,
+            dictation_settings.paste_preview_on_session_end,
+        )
+        if (
+            dictation_settings.paste_final
+            and dictation_settings.paste_preview_on_session_end
+        ):
+            print(
+                "Listening and pasting final text. Pending preview will paste "
+                "if the session ends before final. Press Ctrl+C to stop.\n"
+            )
+        elif dictation_settings.paste_final:
+            print("Listening and pasting final text. Press Ctrl+C to stop.\n")
+        else:
+            print(
+                "Listening and pasting session-end preview text. "
+                "Press Ctrl+C to stop.\n"
+            )
         text_output = WindowsTextOutput()
     else:
         logger.info("Listening session started with paste mode disabled.")
         print("Listening. Press Ctrl+C to stop.\n")
         text_output = None
 
+    def output_prepared_text(
+        output: WindowsTextOutput,
+        transcript: str,
+        source_name: str,
+    ) -> None:
+        # Final commits and explicit session-end preview commits must use the
+        # same command-word and spacing rules. That keeps the preview salvage
+        # path from becoming a second, subtly different text-output pipeline.
+        text, action = prepare_text(transcript, dictation_settings)
+        try:
+            if action == "backspace":
+                output.press_backspace()
+            elif text:
+                output.paste_text(text)
+        except OSError as exc:
+            # Paste errors are reported but do not end recognition. A transient
+            # clipboard lock should not throw away the active Google stream; a
+            # later final or session-end preview can still paste.
+            logger.warning("%s output failed: %s", source_name, exc)
+            print(f"\n{source_name} warning: {exc}", file=sys.stderr, flush=True)
+
     stream_context = None
     last_interim_overlay_time = 0.0
     last_interim_overlay_text = ""
+    # This stores the newest non-final transcript that could still be useful if
+    # the session ends before Google emits final. It is reset whenever a final
+    # result arrives, because a final result means the preview is no longer the
+    # pending text the user saw as uncommitted.
+    pending_preview_text = ""
     # Track the previous one-line console preview width so the next preview or
     # final line can erase trailing characters left by a longer interim result.
     last_console_interim_width = 0
@@ -233,10 +283,15 @@ def listen(
                     continue
 
                 if on_recognition_text is not None:
-                    # Final text is the only text sent to the active app. Clear
-                    # the overlay first so the visual preview does not look like
+                    # A final result retires the pending preview. Clear the
+                    # overlay first so the visual preview does not look like
                     # uncommitted text after the final paste happens.
                     on_recognition_text("")
+                last_interim_overlay_text = ""
+                pending_preview_text = ""
+
+                if not dictation_settings.paste_final:
+                    continue
 
                 if not final_deduper.should_output(transcript):
                     logger.info("Skipped duplicate final transcript.")
@@ -247,21 +302,17 @@ def listen(
                     continue
 
                 # Final transcripts are the only text allowed to reach Windows
-                # output. Interim transcripts are displayed for debugging but
-                # never pasted, because Google can revise them as speech
-                # recognition context improves.
-                text, action = prepare_text(transcript, dictation_settings)
-                try:
-                    if action == "backspace":
-                        text_output.press_backspace()
-                    elif text:
-                        text_output.paste_text(text)
-                except OSError as exc:
-                    # Paste errors are reported but do not end recognition. A
-                    # transient clipboard lock should not throw away the active
-                    # Google stream; the next final transcript can still paste.
-                    logger.warning("Paste failed: %s", exc)
-                    print(f"\nPaste warning: {exc}", file=sys.stderr, flush=True)
+                # output during the live stream. Session-end preview paste is
+                # handled in finally so it can only happen after the Google
+                # stream has stopped without a final result.
+                output_prepared_text(text_output, transcript, "Paste")
+
+            if latest_interim_transcript:
+                # Keep the newest Google interim separately from the overlay's
+                # redraw throttle. The throttle is a visual performance rule;
+                # it should not decide which pending preview is salvaged if the
+                # session ends before final.
+                pending_preview_text = latest_interim_transcript
 
             if latest_interim_transcript and on_recognition_text is not None:
                 now = time.monotonic()
@@ -308,6 +359,25 @@ def listen(
         logger.info("Listening session ended.")
         if idle_timer is not None:
             idle_timer.cancel()
+        if (
+            dictation_settings.paste_preview_on_session_end
+            and pending_preview_text
+            and text_output is not None
+        ):
+            if last_console_interim_width:
+                print(
+                    "\r" + (" " * last_console_interim_width) + "\r",
+                    end="",
+                    flush=True,
+                )
+                last_console_interim_width = 0
+            logger.info("Pasting pending preview text at session end.")
+            print(f"SESSION END PREVIEW: {pending_preview_text}", flush=True)
+            output_prepared_text(
+                text_output,
+                pending_preview_text,
+                "Session-end preview",
+            )
         if on_recognition_text is not None:
             on_recognition_text("")
         if stream_context is not None:

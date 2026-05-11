@@ -4,7 +4,7 @@
 
 ## 1. App 目標
 
-Win Voice Input 是一個 Windows 本機語音輸入工具。它透過 Google Speech-to-Text 串流辨識麥克風音訊，將 interim result 顯示在 overlay listening indicator，等 Google 回傳 final result 後才把文字貼到目前前景應用程式。這個設計避免把 Google 仍可能修正的中途文字寫入輸入框，同時仍然讓使用者知道目前正在辨識甚麼。
+Win Voice Input 是一個 Windows 本機語音輸入工具。它透過 Google Speech-to-Text 串流辨識麥克風音訊，將 interim result 顯示在 overlay listening indicator，等 Google 回傳 final result 後才把文字貼到目前前景應用程式。使用者也可以開啟 session-end preview 輸出，讓 session 結束但 Google 尚未回傳 final 時貼上最後一段 preview。這個設計避免把 Google 仍可能修正的中途文字即時寫入輸入框，同時仍然讓使用者知道目前正在辨識甚麼。
 
 核心行為：
 
@@ -13,7 +13,7 @@ Win Voice Input 是一個 Windows 本機語音輸入工具。它透過 Google Sp
 - 顯示 tray icon 狀態：聆聽時使用綠色 `mic.svg`，非聆聽時使用主題感知的 `mic-mute.svg`。
 - 聆聽時播放 `start.mp3`，停止時播放 `end.mp3`。
 - 聆聽時顯示 Win32 layered overlay，overlay 上顯示 interim transcript。
-- final transcript 才經 Windows clipboard + `SendInput(Ctrl+V)` 貼到目前輸入位置。
+- final transcript 經 Windows clipboard + `SendInput(Ctrl+V)` 貼到目前輸入位置；開啟 `pastePreviewOnSessionEnd` 後，session 結束時仍 pending 的 preview 也會走同一條輸出管線。
 - 若指定時間內沒有任何辨識文字，預設 5 秒自動停止該次聆聽 session。
 - Settings UI 直接修改 `config.json`，儲存後由主程式重新啟動以載入新設定。
 
@@ -29,9 +29,10 @@ flowchart TB
     Google --> Session
 
     Session -- "interim transcript<br/>rate-limited" --> Indicator["ListeningIndicator<br/>Win32 layered overlay"]
-    Session -- "final transcript only" --> Processing["text_processing.prepare_text()"]
-    Processing --> Deduper["FinalTranscriptDeduper"]
-    Deduper --> Output["WindowsTextOutput<br/>Clipboard + SendInput"]
+    Session -- "final transcript" --> Deduper["FinalTranscriptDeduper"]
+    Deduper --> Processing["text_processing.prepare_text()"]
+    Session -- "session-end preview" --> Processing
+    Processing --> Output["WindowsTextOutput<br/>Clipboard + SendInput"]
     Output --> ActiveApp["Active Windows app"]
 
     Settings["ConfigEditorWindow<br/>PySide6"] --> Config["config.json"]
@@ -61,6 +62,7 @@ classDiagram
     class DictationSettings {
         <<dataclass frozen>>
         +bool paste_final
+        +bool paste_preview_on_session_end
         +bool command_words
         +bool append_space
         +float final_dedupe_seconds
@@ -235,7 +237,8 @@ flowchart TD
     HasResult -- "Yes" --> Final{"result.is_final?"}
 
     Final -- "No" --> LatestInterim["Keep latest non-final transcript in response"]
-    LatestInterim --> RateLimit{"Changed and >= 0.35s?"}
+    LatestInterim --> PendingPreview["Store pending preview for session-end paste"]
+    PendingPreview --> RateLimit{"Changed and >= 0.35s?"}
     RateLimit -- "Yes" --> Overlay["Update overlay text"]
     RateLimit -- "No" --> Responses
     Overlay --> Responses
@@ -252,7 +255,12 @@ flowchart TD
 
     Responses --> Stop{"stop_event set?"}
     Stop -- "No" --> Responses
-    Stop -- "Yes" --> Cleanup["Close timer, stream, overlay text"]
+    Stop -- "Yes" --> PreviewPaste{"pending preview and pastePreviewOnSessionEnd?"}
+    PreviewPaste -- "Yes" --> PreviewPrepare["prepare_text(pending preview)"]
+    PreviewPrepare --> PreviewClipboard["Set CF_UNICODETEXT clipboard"]
+    PreviewClipboard --> PreviewSendInput["Send Ctrl+V"]
+    PreviewSendInput --> Cleanup
+    PreviewPaste -- "No" --> Cleanup["Close timer, stream, overlay text"]
     Cleanup --> Idle["Controller status = Idle"]
 ```
 
@@ -282,8 +290,10 @@ sequenceDiagram
     S->>G: streaming_recognize(audio chunks)
     G-->>S: interim result
     S->>I: set_text(interim transcript)
+    S->>S: store pending preview transcript
     G-->>S: final result
     S->>I: set_text("")
+    S->>S: clear pending preview transcript
     S->>S: dedupe + prepare_text
     S->>O: paste_text(final text)
     O->>A: Set clipboard + SendInput Ctrl+V
@@ -291,6 +301,11 @@ sequenceDiagram
     H->>C: toggle()
     C->>S: stop_event.set()
     C->>T: on_status_change("Stopping")
+    opt pastePreviewOnSessionEnd and pending preview exists
+        S->>S: prepare_text(pending preview)
+        S->>O: paste_text(preview text)
+        O->>A: Set clipboard + SendInput Ctrl+V
+    end
     T->>I: set_text("") & hide()
     S-->>C: worker exits
     C->>T: on_status_change("Idle")
@@ -335,7 +350,7 @@ Google response 可能在同一 response 內包含多個 result。程式只把�
 
 ### 8.5 Interim Preview
 
-Interim text 只會送到 `ListeningIndicator.set_text()`，不會貼入 active app。更新有 `0.35s` rate limit，而且必須 text changed。這樣可避免 Google interim result 每秒多次修正時令 overlay 閃動太頻密。
+Interim text 在聆聽期間只會送到 `ListeningIndicator.set_text()`，不會即時貼入 active app。更新有 `0.35s` rate limit，而且必須 text changed。這樣可避免 Google interim result 每秒多次修正時令 overlay 閃動太頻密。當 `pastePreviewOnSessionEnd` 啟用時，`listen()` 會另外記住最新 non-final transcript；如果 session 結束前沒有 final result 清空這段 pending preview，才會在 cleanup 階段用同一條 `prepare_text()` / `WindowsTextOutput` 管線貼上。
 
 Overlay 的文字使用 CJK-capable Windows font，如 Microsoft JhengHei / Microsoft YaHei / MingLiU，避免中文變成方框。長文字會做 leading ellipsis，保留最新識別到的尾段文字，因為使用者最需要確認目前正在說的內容。
 
@@ -404,7 +419,7 @@ Overlay 的文字使用 CJK-capable Windows font，如 Microsoft JhengHei / Micr
 | 檔案 / Class | 職責 |
 | --- | --- |
 | `src/config/audio_settings.py` / `AudioSettings` | Immutable audio settings：sample rate、chunk size、device index。 |
-| `src/config/dictation_settings.py` / `DictationSettings` | Immutable dictation behavior：paste、command words、spacing、dedupe、idle timeout。 |
+| `src/config/dictation_settings.py` / `DictationSettings` | Immutable dictation behavior：final paste、session-end preview paste、command words、spacing、dedupe、idle timeout。 |
 | `src/config/feedback_settings.py` / `FeedbackSettings` | Immutable feedback settings：status sounds、overlay、overlay position。 |
 | `src/config/constants.py` | 預設值、assets folder name、settings save restart exit code、允許 overlay positions。 |
 | `src/config/paths.py` / `get_asset_dir()` | 統一 source run 和 PyInstaller run 的 assets path rule。 |
