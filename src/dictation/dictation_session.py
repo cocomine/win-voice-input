@@ -116,6 +116,15 @@ def listen(
         session. transcript is either a Google final result or the pending
         preview being committed at session end. source_name labels warnings so
         logs show which commit path hit a clipboard or keyboard error.
+
+        The transcript first passes through prepare_text() so final commits and
+        session-end preview commits share the same command-word replacement,
+        optional spacing, and backspace-command detection. prepare_text()
+        returns either text to paste or an action such as "backspace"; this
+        function then maps that action to the matching WindowsTextOutput call.
+        OSError is logged and reported without re-raising because clipboard or
+        SendInput failures can be transient, and one failed output attempt
+        should not terminate the recognition session or discard later text.
         """
         # Final commits and explicit session-end preview commits must use the
         # same command-word and spacing rules. That keeps the preview salvage
@@ -137,9 +146,13 @@ def listen(
     last_interim_overlay_time = 0.0
     last_interim_overlay_text = ""
     # pending_preview_text is the single transcript that session-end preview
-    # paste may commit. It is set from the latest non-final result before the
-    # overlay rate-limit block, cleared when any final result retires that
-    # preview, and read only during cleanup after Google streaming has stopped.
+    # paste may commit. Each response calculates latest_interim_transcript from
+    # Google's newest non-final result, then copies it here before any overlay
+    # throttle can skip a redraw. A final result clears this value because the
+    # same spoken segment has been committed through the normal final path; the
+    # finally block can then read this local variable safely after streaming
+    # stops and know that a non-empty value still represents uncommitted preview
+    # text.
     pending_preview_text = ""
     # Track the previous one-line console preview width so the next preview or
     # final line can erase trailing characters left by a longer interim result.
@@ -322,9 +335,12 @@ def listen(
             if latest_interim_transcript:
                 # Keep the newest Google interim separately from the overlay's
                 # redraw throttle, and do it before the rate-limit decision
-                # below. The throttle is a visual performance rule; it should
-                # not decide which pending preview is salvaged if the session
-                # ends before final.
+                # below. The throttle compares the latest text with the last
+                # rendered overlay text and enforces a minimum redraw interval;
+                # that protects UI performance but may intentionally skip a
+                # newer interim transcript. Salvage must be based on the latest
+                # recognition content, not the last painted frame, so an
+                # unexpected stop still has the newest available interim text.
                 pending_preview_text = latest_interim_transcript
 
             if latest_interim_transcript and on_recognition_text is not None:
@@ -372,10 +388,14 @@ def listen(
         logger.info("Listening session ended.")
         if idle_timer is not None:
             idle_timer.cancel()
-        # Session-end preview paste runs in finally because only cleanup knows
-        # that the stream is ending without another chance for Google to emit a
-        # final result. The three guards keep the behavior opt-in, require real
-        # pending text, and ensure Windows output was created for a paste path.
+        # Session-end preview paste runs in finally because only cleanup is past
+        # the response loop and knows Google will not emit another final result
+        # for this session. The guards are ordered from policy to data to output:
+        # the user must opt in, a non-empty pending_preview_text must still
+        # exist after any normal final result had a chance to clear it, and a
+        # WindowsTextOutput instance must exist because at least one paste path
+        # was enabled. This avoids double-pasting after a normal final commit
+        # while still salvaging an uncommitted preview when the stream ends.
         if (
             dictation_settings.paste_preview_on_session_end
             and pending_preview_text
