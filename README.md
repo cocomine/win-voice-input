@@ -8,7 +8,7 @@ Win Voice Input 是一個 Windows 語音輸入工具，使用 Google Speech-to-T
 - 使用 Windows 預設輸入裝置；亦可在 Settings 指定其他 microphone。
 - 使用 `Ctrl+Alt+Space` 或 tray menu 開始 / 暫停語音輸入。
 - 聆聽期間會顯示 overlay 狀態視窗，讓使用者看到目前正在識別的文字。
-- 預設只會貼上 final 結果；如果開啟 session-end preview 輸出，session 結束時仍未變成 final 的 preview 文字也會被貼上。
+- 預設會貼上 final 結果；如果 session 結束時仍未變成 final，但 preview 仍有文字，也會貼上該段 preview。可在 Settings 關閉 preview 收尾輸出。
 - 使用 Windows clipboard + paste 方式輸出 final 文字，適合中文輸入。
 - Tray icon 會顯示 Idle / Listening / Stopping 狀態。
 - 開始聆聽和停止聆聽時會播放提示音。
@@ -49,7 +49,7 @@ WinVoiceInput\
 
 3. 開始說話。聆聽期間 overlay 會顯示目前識別中的文字。
 
-4. 當 Google 回傳 final 結果後，程式會自動把文字貼到目前輸入框。如果已開啟 session-end preview 輸出，而 session 結束時仍有 preview 文字，程式會貼上該段 preview。
+4. 當 Google 回傳 final 結果後，程式會自動把文字貼到目前輸入框。如果 session 結束時仍有 preview 文字但沒有 final，程式會貼上該段 preview；可在 Settings 關閉此行為。
 
 5. 再按一次 `Ctrl+Alt+Space`，或者在 tray menu 選擇 Pause listening，即可停止目前聆聽 session。
 
@@ -90,7 +90,7 @@ Settings 會修改 `config.json`。成功儲存後，如果 Settings 是從 tray
 
 聆聽時，畫面上會顯示一個小型 overlay 狀態視窗。它的用途是讓使用者知道語音正在被識別，而且可以看到 Google 目前回傳的中途文字。
 
-中途文字不會在聆聽期間即時輸入到目前輸入框。原因是 Google Speech-to-Text 的 interim result 會不停修正，如果直接寫入輸入框，容易造成重複文字、刪除錯位或輸入法相容問題。Win Voice Input 預設只會在 final 結果出現後才貼上文字；如果開啟 `Paste preview when session ends without final`，則只會在 session 結束且沒有 final 可用時，把最後一段 preview 當作收尾文字貼上。
+中途文字不會在聆聽期間即時輸入到目前輸入框。原因是 Google Speech-to-Text 的 interim result 會不停修正，如果直接寫入輸入框，容易造成重複文字、刪除錯位或輸入法相容問題。Win Voice Input 會優先貼上 final 結果；如果 session 結束且沒有 final 可用，預設會把最後一段 preview 當作收尾文字貼上。關閉 `Paste preview when session ends without final` 後，會恢復 strict final-only 輸出。
 
 ## 自動停止
 

@@ -94,64 +94,30 @@ def main() -> int:
         help="Open the config editor, wait until it closes, then exit.",
     )
     parser.add_argument(
-        "--paste-final",
-        dest="paste_final",
-        action="store_true",
-        default=None,
-        help="Paste final transcripts into the active app with Ctrl+V.",
-    )
-    parser.add_argument(
         "--no-paste-final",
         dest="paste_final",
+        default=None,
         action="store_false",
         help="Do not paste final transcripts into the active app.",
     )
     parser.add_argument(
-        "--paste-preview-on-session-end",
-        dest="paste_preview_on_session_end",
-        action="store_true",
-        default=None,
-        help=(
-            "Paste the latest non-final preview if the listening session ends "
-            "before Google returns a final transcript."
-        ),
-    )
-    parser.add_argument(
         "--no-paste-preview-on-session-end",
         dest="paste_preview_on_session_end",
+        default=None,
         action="store_false",
         help="Do not paste pending preview text when a listening session ends.",
     )
     parser.add_argument(
-        "--hotkey",
-        dest="hotkey",
-        action="store_true",
-        default=None,
-        help=(
-            "Use console hotkey mode. Tray mode already includes "
-            f"{HOTKEY_DISPLAY_NAME}, so pass --hotkey without --tray to "
-            "select the non-tray UI."
-        ),
-    )
-    parser.add_argument(
         "--no-hotkey",
         dest="hotkey",
+        default=None,
         action="store_false",
         help=f"Do not use global {HOTKEY_DISPLAY_NAME} hotkey mode.",
     )
     parser.add_argument(
-        "--tray",
-        dest="tray",
-        action="store_true",
-        default=None,
-        help=(
-            "Show a system tray icon with status, Start/Pause/Exit controls, "
-            f"and {HOTKEY_DISPLAY_NAME}."
-        ),
-    )
-    parser.add_argument(
         "--no-tray",
         dest="tray",
+        default=None,
         action="store_false",
         help="Do not show a system tray icon.",
     )
@@ -163,23 +129,11 @@ def main() -> int:
         help="Enable command words like 換行, 逗號, 句號, 刪除.",
     )
     parser.add_argument(
-        "--no-command-words",
-        dest="command_words",
-        action="store_false",
-        help="Keep command words disabled. This is the default.",
-    )
-    parser.add_argument(
         "--append-space",
         dest="append_space",
         action="store_true",
         default=None,
         help="Append a space after pasted final text when it has no ending punctuation.",
-    )
-    parser.add_argument(
-        "--no-append-space",
-        dest="append_space",
-        action="store_false",
-        help="Do not append a space after pasted final text.",
     )
     parser.add_argument(
         "--final-dedupe-seconds",
@@ -199,9 +153,9 @@ def main() -> int:
             f"no recognized text. Use 0 to disable. Default: {DEFAULT_IDLE_TIMEOUT_SECONDS}"
         ),
     )
-    # Boolean options are tri-state here: None means "use config/default",
-    # True/False means an explicit CLI override. This is important for packaged
-    # exe use, where config.json should control daily behavior.
+    # Boolean options are tri-state here: None means "use config/default". The
+    # CLI exposes only switches that differ from the built-in defaults, so daily
+    # packaged launches can omit flags unless they need to override config.
     parser.set_defaults(
         paste_final=None,
         paste_preview_on_session_end=None,
@@ -211,14 +165,6 @@ def main() -> int:
         append_space=None,
     )
     args = parser.parse_args()
-
-    if args.tray is True and args.hotkey is True:
-        message = (
-            "--tray and --hotkey cannot be used together because tray mode "
-            f"already includes {HOTKEY_DISPLAY_NAME}."
-        )
-        show_error_message("Win Voice Input Arguments Error", message)
-        parser.error(message)
 
     if args.list_devices:
         # Listing devices must not create a Google client or touch Windows
@@ -544,11 +490,6 @@ def main() -> int:
         settings["tray"] = args.tray
     if args.hotkey is not None:
         settings["hotkey"] = args.hotkey
-        if args.hotkey and args.tray is None:
-            # Tray mode already includes the global hotkey. An explicit
-            # --hotkey without --tray means the user selected the older console
-            # hotkey UI, so tray is turned off at the command-line boundary.
-            settings["tray"] = False
     if args.command_words is not None:
         settings["command_words"] = args.command_words
     if args.append_space is not None:

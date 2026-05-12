@@ -4,16 +4,12 @@ param(
     [object]$Device = $null,
     [string]$Language = "",
     [object]$Rate = $null,
-    [switch]$PasteFinal,
-    [switch]$ConsoleOnly,
-    [switch]$Tray,
+    [switch]$NoPasteFinal,
+    [switch]$NoPastePreviewOnSessionEnd,
     [switch]$NoTray,
-    [switch]$Hotkey,
     [switch]$NoHotkey,
-    [switch]$EnableCommandWords,
-    [switch]$NoCommandWords,
+    [switch]$CommandWords,
     [switch]$AppendSpace,
-    [switch]$NoAppendSpace,
     [object]$FinalDedupeSeconds = $null,
     [object]$IdleTimeoutSeconds = $null
 )
@@ -28,6 +24,7 @@ $settings = [ordered]@{
     Language = "yue-Hant-HK"
     Rate = 16000
     PasteFinal = $true
+    PastePreviewOnSessionEnd = $true
     Tray = $true
     Hotkey = $true
     CommandWords = $false
@@ -53,6 +50,9 @@ if (Test-Path -LiteralPath $ConfigPath) {
     if ($null -ne $config.language) { $settings.Language = [string]$config.language }
     if ($null -ne $config.rate) { $settings.Rate = $config.rate }
     if ($null -ne $config.pasteFinal) { $settings.PasteFinal = [bool]$config.pasteFinal }
+    if ($null -ne $config.pastePreviewOnSessionEnd) {
+        $settings.PastePreviewOnSessionEnd = [bool]$config.pastePreviewOnSessionEnd
+    }
     if ($null -ne $config.tray) { $settings.Tray = [bool]$config.tray }
     if ($null -ne $config.hotkey) { $settings.Hotkey = [bool]$config.hotkey }
     if ($null -ne $config.commandWords) { $settings.CommandWords = [bool]$config.commandWords }
@@ -73,16 +73,12 @@ if ($Credentials -ne "") { $settings.Credentials = $Credentials }
 if ($PSBoundParameters.ContainsKey("Device")) { $settings.Device = $Device }
 if ($Language -ne "") { $settings.Language = $Language }
 if ($PSBoundParameters.ContainsKey("Rate")) { $settings.Rate = $Rate }
-if ($PasteFinal) { $settings.PasteFinal = $true }
-if ($ConsoleOnly) { $settings.PasteFinal = $false }
-if ($Tray) { $settings.Tray = $true }
+if ($NoPasteFinal) { $settings.PasteFinal = $false }
+if ($NoPastePreviewOnSessionEnd) { $settings.PastePreviewOnSessionEnd = $false }
 if ($NoTray) { $settings.Tray = $false }
-if ($Hotkey) { $settings.Hotkey = $true }
 if ($NoHotkey) { $settings.Hotkey = $false }
-if ($EnableCommandWords) { $settings.CommandWords = $true }
-if ($NoCommandWords) { $settings.CommandWords = $false }
+if ($CommandWords) { $settings.CommandWords = $true }
 if ($AppendSpace) { $settings.AppendSpace = $true }
-if ($NoAppendSpace) { $settings.AppendSpace = $false }
 if ($PSBoundParameters.ContainsKey("FinalDedupeSeconds")) { $settings.FinalDedupeSeconds = $FinalDedupeSeconds }
 if ($PSBoundParameters.ContainsKey("IdleTimeoutSeconds")) { $settings.IdleTimeoutSeconds = $IdleTimeoutSeconds }
 
@@ -128,17 +124,23 @@ if ($null -ne $settings.Device) {
     $arguments += $settings.Device
 }
 
-# Paste mode remains separate from tray/hotkey mode: tray and hotkey control
-# when audio is streamed to Google, while paste mode controls where final
-# transcripts go.
-if ($settings.PasteFinal) {
-    $arguments += "--paste-final"
+# The Python CLI now exposes only flags that differ from built-in defaults.
+# Therefore the wrapper passes negative paste flags only when final output or
+# session-end preview salvage has been disabled by config or this script.
+if (-not $settings.PasteFinal) {
+    $arguments += "--no-paste-final"
 }
 
-if ($settings.Tray) {
-    $arguments += "--tray"
-} elseif ($settings.Hotkey) {
-    $arguments += "--hotkey"
+if (-not $settings.PastePreviewOnSessionEnd) {
+    $arguments += "--no-paste-preview-on-session-end"
+}
+
+if (-not $settings.Tray) {
+    $arguments += "--no-tray"
+}
+
+if (-not $settings.Hotkey) {
+    $arguments += "--no-hotkey"
 }
 
 # Python's default is command words disabled. The wrapper only passes a flag

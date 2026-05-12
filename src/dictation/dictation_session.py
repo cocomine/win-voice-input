@@ -65,8 +65,8 @@ def listen(
     )
 
     # A Windows output object is needed when either commit path can paste text:
-    # normal final transcripts during streaming, or the opt-in session-end
-    # preview salvage path. This keeps paste_final and
+    # normal final transcripts during streaming, or the session-end preview
+    # salvage path. This keeps paste_final and
     # paste_preview_on_session_end independent while still leaving fully
     # read-only console mode free of clipboard and keyboard side effects.
     output_enabled = (
@@ -391,11 +391,12 @@ def listen(
         # Session-end preview paste runs in finally because only cleanup is past
         # the response loop and knows Google will not emit another final result
         # for this session. The guards are ordered from policy to data to output:
-        # the user must opt in, a non-empty pending_preview_text must still
-        # exist after any normal final result had a chance to clear it, and a
-        # WindowsTextOutput instance must exist because at least one paste path
-        # was enabled. This avoids double-pasting after a normal final commit
-        # while still salvaging an uncommitted preview when the stream ends.
+        # the user must not have disabled it, a non-empty pending_preview_text
+        # must still exist after any normal final result had a chance to clear
+        # it, and a WindowsTextOutput instance must exist because at least one
+        # paste path was enabled. This avoids double-pasting after a normal
+        # final commit while still salvaging an uncommitted preview when the
+        # stream ends.
         if (
             dictation_settings.paste_preview_on_session_end
             and pending_preview_text
