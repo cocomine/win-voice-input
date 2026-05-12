@@ -3,10 +3,11 @@
 DEFAULT_LANGUAGE = "yue-Hant-HK"
 DEFAULT_RATE = 16000
 DEFAULT_CHUNK_MS = 100
-# Session-end preview paste stays opt-in because Google interim text can still
-# be revised; enabling it is a deliberate choice to salvage short utterances
-# when the stream closes before a final transcript arrives.
-DEFAULT_PASTE_PREVIEW_ON_SESSION_END = False
+# Session-end preview paste defaults on because short utterances are the main
+# failure case: Google may show useful interim text but never emit a final
+# result before the session closes. Users can still disable it from Settings or
+# the CLI when they prefer strict final-only output.
+DEFAULT_PASTE_PREVIEW_ON_SESSION_END = True
 DEFAULT_FINAL_DEDUPE_SECONDS = 0.8
 DEFAULT_IDLE_TIMEOUT_SECONDS = 5.0
 DEFAULT_PLAY_STATUS_SOUNDS = True

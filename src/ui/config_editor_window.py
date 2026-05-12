@@ -429,10 +429,10 @@ class ConfigEditorWindow:
         self.config_data["language"] = self.language_edit.text().strip() or DEFAULT_LANGUAGE
         self.config_data["rate"] = int(self.rate_spin.value())
         self.config_data["pasteFinal"] = self.paste_final_check.isChecked()
-        # This opt-in is separate from pasteFinal because it commits Google's
-        # latest non-final preview only at the session boundary. Keeping it as
-        # an explicit setting lets users choose whether short utterances should
-        # be salvaged when Google never emits final.
+        # This setting is separate from pasteFinal because it commits Google's
+        # latest non-final preview only at the session boundary. Keeping it
+        # explicit lets users disable preview salvage (which is enabled by default)
+        # when they prefer strict final-only output
         self.config_data["pastePreviewOnSessionEnd"] = (
             self.paste_preview_on_session_end_check.isChecked()
         )

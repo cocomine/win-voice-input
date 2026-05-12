@@ -4,7 +4,7 @@
 
 ## 1. App 目標
 
-Win Voice Input 是一個 Windows 本機語音輸入工具。它透過 Google Speech-to-Text 串流辨識麥克風音訊，將 interim result 顯示在 overlay listening indicator，等 Google 回傳 final result 後才把文字貼到目前前景應用程式。使用者也可以開啟 session-end preview 輸出，讓 session 結束但 Google 尚未回傳 final 時貼上最後一段 preview。這個設計避免把 Google 仍可能修正的中途文字即時寫入輸入框，同時仍然讓使用者知道目前正在辨識甚麼。
+Win Voice Input 是一個 Windows 本機語音輸入工具。它透過 Google Speech-to-Text 串流辨識麥克風音訊，將 interim result 顯示在 overlay listening indicator，等 Google 回傳 final result 後才把文字貼到目前前景應用程式。預設也會在 session 結束但 Google 尚未回傳 final 時貼上最後一段 preview；使用者可以關閉 session-end preview 輸出以恢復 strict final-only 行為。這個設計避免把 Google 仍可能修正的中途文字即時寫入輸入框，同時仍然讓使用者知道目前正在辨識甚麼。
 
 核心行為：
 
@@ -13,7 +13,7 @@ Win Voice Input 是一個 Windows 本機語音輸入工具。它透過 Google Sp
 - 顯示 tray icon 狀態：聆聽時使用綠色 `mic.svg`，非聆聽時使用主題感知的 `mic-mute.svg`。
 - 聆聽時播放 `start.mp3`，停止時播放 `end.mp3`。
 - 聆聽時顯示 Win32 layered overlay，overlay 上顯示 interim transcript。
-- final transcript 經 Windows clipboard + `SendInput(Ctrl+V)` 貼到目前輸入位置；開啟 `pastePreviewOnSessionEnd` 後，session 結束時仍 pending 的 preview 也會走同一條輸出管線。
+- final transcript 經 Windows clipboard + `SendInput(Ctrl+V)` 貼到目前輸入位置；`pastePreviewOnSessionEnd` 預設開啟，所以 session 結束時仍 pending 的 preview 也會走同一條輸出管線。
 - 若指定時間內沒有任何辨識文字，預設 5 秒自動停止該次聆聽 session。
 - Settings UI 直接修改 `config.json`，儲存後由主程式重新啟動以載入新設定。
 
@@ -350,7 +350,7 @@ Google response 可能在同一 response 內包含多個 result。程式只把�
 
 ### 8.5 Interim Preview
 
-Interim text 在聆聽期間只會送到 `ListeningIndicator.set_text()`，不會即時貼入 active app。更新有 `0.35s` rate limit，而且必須 text changed。這樣可避免 Google interim result 每秒多次修正時令 overlay 閃動太頻密。當 `pastePreviewOnSessionEnd` 啟用時，`listen()` 會另外記住最新 non-final transcript；如果 session 結束前沒有 final result 清空這段 pending preview，才會在 cleanup 階段用同一條 `prepare_text()` / `WindowsTextOutput` 管線貼上。
+Interim text 在聆聽期間只會送到 `ListeningIndicator.set_text()`，不會即時貼入 active app。更新有 `0.35s` rate limit，而且必須 text changed。這樣可避免 Google interim result 每秒多次修正時令 overlay 閃動太頻密。因為 `pastePreviewOnSessionEnd` 預設啟用，`listen()` 會另外記住最新 non-final transcript；如果 session 結束前沒有 final result 清空這段 pending preview，才會在 cleanup 階段用同一條 `prepare_text()` / `WindowsTextOutput` 管線貼上。
 
 Overlay 的文字使用 CJK-capable Windows font，如 Microsoft JhengHei / Microsoft YaHei / MingLiU，避免中文變成方框。長文字會做 leading ellipsis，保留最新識別到的尾段文字，因為使用者最需要確認目前正在說的內容。
 
@@ -571,7 +571,7 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 Console-only mode：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -ConsoleOnly
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -NoPasteFinal
 ```
 
 不使用 tray：
@@ -595,7 +595,7 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 啟用 command words 測試：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -EnableCommandWords
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -CommandWords
 ```
 
 ### 13.4 Build Windows Exe
