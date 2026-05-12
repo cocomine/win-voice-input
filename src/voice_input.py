@@ -154,8 +154,9 @@ def main() -> int:
         ),
     )
     # Boolean options are tri-state here: None means "use config/default". The
-    # CLI exposes only switches that differ from the built-in defaults, so daily
-    # packaged launches can omit flags unless they need to override config.
+    # reduced CLI intentionally exposes only launch-time toggles we support:
+    # disabling default-on behavior or enabling default-off text-processing
+    # features. Other persistent mode changes should go through config/Settings.
     parser.set_defaults(
         paste_final=None,
         paste_preview_on_session_end=None,
