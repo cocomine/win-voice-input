@@ -350,7 +350,7 @@ Google response 可能在同一 response 內包含多個 result。程式只把�
 
 ### 8.5 Interim Preview
 
-Interim text 在聆聽期間只會送到 `ListeningIndicator.set_text()`，不會即時貼入 active app。更新有 `0.35s` rate limit，而且必須 text changed。這樣可避免 Google interim result 每秒多次修正時令 overlay 閃動太頻密。因為 `pastePreviewOnSessionEnd` 預設啟用，`listen()` 會另外記住最新 non-final transcript；如果 session 結束前沒有 final result 清空這段 pending preview，才會在 cleanup 階段用同一條 `prepare_text()` / `WindowsTextOutput` 管線貼上。
+Interim text 在聆聽期間只會送到 `ListeningIndicator.set_text()`，不會即時貼入 active app。更新有 `0.35s` rate limit，而且必須 text changed。這樣可避免 Google interim result 每秒多次修正時令 overlay 閃動太頻密。因為 `pastePreviewOnSessionEnd` 預設啟用，`listen()` 會另外記住最新 non-final transcript；如果 session 結束前沒有 final result 清空這段 pending preview，才會在 cleanup 階段用同一條 `prepare_text()` / `WindowsTextOutput` 管線貼上。手動按 `Ctrl+Alt+Space` 暫停時，已經由 Google 交付的 response 會先完成 final / interim 處理，然後才退出 streaming loop，避免把手動停止當刻的最新 preview 丟掉。
 
 Overlay 的文字使用 CJK-capable Windows font，如 Microsoft JhengHei / Microsoft YaHei / MingLiU，避免中文變成方框。長文字會做 leading ellipsis，保留最新識別到的尾段文字，因為使用者最需要確認目前正在說的內容。
 
@@ -368,6 +368,8 @@ Overlay 的文字使用 CJK-capable Windows font，如 Microsoft JhengHei / Micr
 ### 8.7 Overlay Window
 
 `ListeningIndicator` 是 Win32 layered topmost no-activate window，不搶 focus。它用 Pillow 先在高解析度 canvas 畫 panel、mic bubble、SVG mic、文字和 halo，再 downsample 成 32-bit bitmap，交由 `UpdateLayeredWindow` 顯示。
+
+每次發布可見 frame 後，overlay 會用 `SetWindowPos(HWND_TOPMOST, ...)` 重新確認 z-order。原因是 Windows 登入啟動期間 Explorer、tray surface 和被還原的應用程式可能在 overlay 建窗後才完成初始化；如果只依賴 `WS_EX_TOPMOST` 建窗旗標，開機自動啟動時可能被後續視窗蓋過。`SetWindowPos` 使用 `SWP_NOMOVE`、`SWP_NOSIZE` 和 `SWP_NOACTIVATE`，所以只重申置頂狀態，不改變 overlay 位置、大小或前景 focus。
 
 動畫：
 

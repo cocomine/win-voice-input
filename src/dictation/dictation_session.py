@@ -191,9 +191,9 @@ def listen(
         )
 
         for response in responses:
-            if session_stop_event.is_set():
-                break
             if not response.results:
+                if session_stop_event.is_set():
+                    break
                 continue
 
             response_index += 1
@@ -390,6 +390,15 @@ def listen(
                         INTERIM_OVERLAY_MIN_INTERVAL_SECONDS,
                         latest_interim_transcript,
                     )
+
+            if session_stop_event.is_set():
+                # A manual hotkey pause can set the stop event while Google is
+                # delivering the response that contains the latest visible
+                # preview. Process the delivered response first so final commits
+                # and pending-preview tracking stay accurate, then exit the loop
+                # and let the single cleanup paste path decide whether to
+                # commit the remaining preview.
+                break
     finally:
         # Timers and microphone streams are closed in finally so Ctrl+C, Google
         # errors, and idle timeout all release the same resources.

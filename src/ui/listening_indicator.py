@@ -111,6 +111,9 @@ class ListeningIndicator:
     WS_EX_NOACTIVATE = 0x08000000
     SW_HIDE = 0
     SW_SHOWNOACTIVATE = 4
+    HWND_TOPMOST = ctypes.c_void_p(-1)
+    SWP_NOSIZE = 0x0001
+    SWP_NOMOVE = 0x0002
     SWP_NOACTIVATE = 0x0010
     SWP_SHOWWINDOW = 0x0040
     SPI_GETWORKAREA = 0x0030
@@ -289,6 +292,16 @@ class ListeningIndicator:
         self._user32.DestroyWindow.restype = wintypes.BOOL
         self._user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
         self._user32.ShowWindow.restype = wintypes.BOOL
+        self._user32.SetWindowPos.argtypes = [
+            wintypes.HWND,
+            wintypes.HWND,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.UINT,
+        ]
+        self._user32.SetWindowPos.restype = wintypes.BOOL
         self._user32.SetTimer.argtypes = [
             wintypes.HWND,
             UINT_PTR,
@@ -893,6 +906,27 @@ class ListeningIndicator:
             0,
             ctypes.byref(blend),
             self.ULW_ALPHA,
+        ):
+            raise ctypes.WinError()
+        # WS_EX_TOPMOST is assigned when the hidden layered window is created,
+        # but Windows startup can reorder top-level windows as Explorer, tray
+        # surfaces, and restored apps finish initializing. Reasserting the
+        # z-order at the moment a visible frame is published makes the overlay's
+        # "always above normal windows" contract independent of that boot-time
+        # race. SWP_NOMOVE/SWP_NOSIZE preserve the coordinates and bitmap size
+        # that UpdateLayeredWindow just applied, while SWP_NOACTIVATE keeps the
+        # user's editor focused.
+        if not self._user32.SetWindowPos(
+            self._hwnd,
+            self.HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            self.SWP_NOMOVE
+            | self.SWP_NOSIZE
+            | self.SWP_NOACTIVATE
+            | self.SWP_SHOWWINDOW,
         ):
             raise ctypes.WinError()
         self._user32.ShowWindow(self._hwnd, self.SW_SHOWNOACTIVATE)
