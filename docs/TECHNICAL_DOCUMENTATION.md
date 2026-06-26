@@ -369,7 +369,7 @@ Overlay 的文字使用 CJK-capable Windows font，如 Microsoft JhengHei / Micr
 
 `ListeningIndicator` 是 Win32 layered topmost no-activate window，不搶 focus。它用 Pillow 先在高解析度 canvas 畫 panel、mic bubble、SVG mic、文字和 halo，再 downsample 成 32-bit bitmap，交由 `UpdateLayeredWindow` 顯示。
 
-每次發布可見 frame 後，overlay 會用 `SetWindowPos(HWND_TOPMOST, ...)` 重新確認 z-order。原因是 Windows 登入啟動期間 Explorer、tray surface 和被還原的應用程式可能在 overlay 建窗後才完成初始化；如果只依賴 `WS_EX_TOPMOST` 建窗旗標，開機自動啟動時可能被後續視窗蓋過。`SetWindowPos` 使用 `SWP_NOMOVE`、`SWP_NOSIZE` 和 `SWP_NOACTIVATE`，所以只重申置頂狀態，不改變 overlay 位置、大小或前景 focus。
+當 overlay 收到顯示請求、並準備發布該次 visible session 的第一個可見 frame 時，會用 `SetWindowPos(HWND_TOPMOST, ...)` 重新確認 z-order。原因是 Windows 登入啟動期間 Explorer、tray surface 和被還原的應用程式可能在 overlay 建窗後才完成初始化；如果只依賴 `WS_EX_TOPMOST` 建窗旗標，開機自動啟動時可能被後續視窗蓋過。`SetWindowPos` 使用 `SWP_NOMOVE`、`SWP_NOSIZE` 和 `SWP_NOACTIVATE`，所以只重申置頂狀態，不改變 overlay 位置、大小或前景 focus，也避免在 60fps halo frame 中重複呼叫 Win32 z-order API。
 
 動畫：
 

@@ -111,11 +111,10 @@ class ListeningIndicator:
     WS_EX_NOACTIVATE = 0x08000000
     SW_HIDE = 0
     SW_SHOWNOACTIVATE = 4
-    HWND_TOPMOST = ctypes.c_void_p(-1)
+    HWND_TOPMOST = wintypes.HWND(-1)
     SWP_NOSIZE = 0x0001
     SWP_NOMOVE = 0x0002
     SWP_NOACTIVATE = 0x0010
-    SWP_SHOWWINDOW = 0x0040
     SPI_GETWORKAREA = 0x0030
     BI_RGB = 0
     DIB_RGB_COLORS = 0
@@ -138,6 +137,7 @@ class ListeningIndicator:
         # can stay simple; _update_window only translates the anchor into x/y.
         self.position = normalized_position
         self._visible_event = threading.Event()
+        self._topmost_refresh_event = threading.Event()
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
         self._text_lock = threading.Lock()
@@ -161,6 +161,10 @@ class ListeningIndicator:
         # _animation_target_fraction stores the new destination. This lets the
         # timer reverse direction smoothly if listening is toggled mid-motion.
         self._visible_fraction = 0.0
+        # The Win32 window can stay hidden while its layered bitmap is updated
+        # for animation. Tracking the actual show state lets the timer avoid
+        # repeated ShowWindow calls after the overlay is already visible.
+        self._window_is_shown = False
         self._animation_start_time_ms: float | None = None
         self._animation_start_fraction = 0.0
         self._animation_target_fraction = 0.0
@@ -382,6 +386,10 @@ class ListeningIndicator:
         # show() can be called from tray or recognition callback threads. It
         # only flips an event; the Win32 thread reads that event and performs
         # the actual layered-window update safely inside its message loop.
+        # Topmost refresh is requested here, then consumed by the next visible
+        # frame. That keeps the startup z-order repair tied to visibility
+        # transitions instead of repeating SetWindowPos during every halo frame.
+        self._topmost_refresh_event.set()
         self._visible_event.set()
 
     def hide(self) -> None:
@@ -499,6 +507,7 @@ class ListeningIndicator:
                 self._print_exception_warning(exc)
                 if self._hwnd is not None:
                     self._user32.ShowWindow(self._hwnd, self.SW_HIDE)
+                    self._window_is_shown = False
             return 0
         if message == self.WM_DESTROY:
             self._user32.KillTimer(hwnd, self.TIMER_ID)
@@ -820,7 +829,9 @@ class ListeningIndicator:
         self._set_timer_interval(timer_interval)
 
         if self._visible_fraction <= 0.0:
-            self._user32.ShowWindow(self._hwnd, self.SW_HIDE)
+            if self._window_is_shown:
+                self._user32.ShowWindow(self._hwnd, self.SW_HIDE)
+                self._window_is_shown = False
             return
 
         work_area = RECT()
@@ -908,28 +919,30 @@ class ListeningIndicator:
             self.ULW_ALPHA,
         ):
             raise ctypes.WinError()
-        # WS_EX_TOPMOST is assigned when the hidden layered window is created,
-        # but Windows startup can reorder top-level windows as Explorer, tray
-        # surfaces, and restored apps finish initializing. Reasserting the
-        # z-order at the moment a visible frame is published makes the overlay's
-        # "always above normal windows" contract independent of that boot-time
-        # race. SWP_NOMOVE/SWP_NOSIZE preserve the coordinates and bitmap size
-        # that UpdateLayeredWindow just applied, while SWP_NOACTIVATE keeps the
-        # user's editor focused.
-        if not self._user32.SetWindowPos(
-            self._hwnd,
-            self.HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            self.SWP_NOMOVE
-            | self.SWP_NOSIZE
-            | self.SWP_NOACTIVATE
-            | self.SWP_SHOWWINDOW,
-        ):
-            raise ctypes.WinError()
-        self._user32.ShowWindow(self._hwnd, self.SW_SHOWNOACTIVATE)
+        if self._topmost_refresh_event.is_set() or not self._window_is_shown:
+            # WS_EX_TOPMOST is assigned when the hidden layered window is
+            # created, but Windows startup can reorder top-level windows as
+            # Explorer, tray surfaces, and restored apps finish initializing.
+            # Reasserting z-order once when a visible session begins repairs
+            # that boot-time race without adding a SetWindowPos call to every
+            # animation or halo frame. SWP_NOMOVE/SWP_NOSIZE preserve the
+            # coordinates and bitmap size that UpdateLayeredWindow just applied,
+            # while SWP_NOACTIVATE keeps the user's editor focused.
+            if not self._user32.SetWindowPos(
+                self._hwnd,
+                self.HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                self.SWP_NOMOVE | self.SWP_NOSIZE | self.SWP_NOACTIVATE,
+            ):
+                raise ctypes.WinError()
+            self._topmost_refresh_event.clear()
+
+        if not self._window_is_shown:
+            self._user32.ShowWindow(self._hwnd, self.SW_SHOWNOACTIVATE)
+            self._window_is_shown = True
 
     def _print_exception_warning(self, exc: Exception) -> None:
         logger.error(
