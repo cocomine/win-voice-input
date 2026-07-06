@@ -11,6 +11,7 @@ from google.cloud import speech
 from audio.microphone_stream import MicrophoneStream
 from config import AudioSettings, DictationSettings
 from dictation.final_transcript_deduper import FinalTranscriptDeduper
+from dictation.preview_commit_coordinator import PreviewCommitCoordinator
 from dictation.text_processing import prepare_text
 from output.windows_text_output import WindowsTextOutput
 
@@ -40,6 +41,7 @@ def listen(
     dictation_settings: DictationSettings,
     stop_event: threading.Event | None = None,
     on_recognition_text: RecognitionTextCallback | None = None,
+    preview_commit_coordinator: PreviewCommitCoordinator | None = None,
 ) -> None:
     client = speech.SpeechClient()
     # Hotkey mode passes in its own event so pressing the configured shortcut
@@ -65,8 +67,8 @@ def listen(
     )
 
     # A Windows output object is needed when either commit path can paste text:
-    # normal final transcripts during streaming, or the session-end preview
-    # salvage path. This keeps paste_final and
+    # normal final transcripts during streaming, or the session-end / Enter
+    # preview commit path. This keeps paste_final and
     # paste_preview_on_session_end independent while still leaving fully
     # read-only console mode free of clipboard and keyboard side effects.
     output_enabled = (
@@ -89,21 +91,27 @@ def listen(
             and dictation_settings.paste_preview_on_session_end
         ):
             print(
-                "Listening and pasting final text. Pending preview will paste "
-                "if the session ends before final. Press Ctrl+C to stop.\n"
+                "Listening and pasting final text. Press Enter to paste "
+                "pending preview without stopping. Pending preview will also "
+                "paste if the session ends before final. Press Ctrl+C to stop.\n"
             )
         elif dictation_settings.paste_final:
-            print("Listening and pasting final text. Press Ctrl+C to stop.\n")
+            print(
+                "Listening and pasting final text. Press Enter to paste "
+                "pending preview without stopping. Press Ctrl+C to stop.\n"
+            )
         else:
             print(
-                "Listening and pasting session-end preview text. "
-                "Press Ctrl+C to stop.\n"
+                "Listening and pasting preview text. Press Enter to paste "
+                "pending preview without stopping. Press Ctrl+C to stop.\n"
             )
         text_output = WindowsTextOutput()
     else:
         logger.info("Listening session started with paste mode disabled.")
         print("Listening. Press Ctrl+C to stop.\n")
         text_output = None
+    preview_committer = preview_commit_coordinator or PreviewCommitCoordinator()
+    preview_committer.attach(text_output, dictation_settings, on_recognition_text)
 
     def output_prepared_text(
         output: WindowsTextOutput,
@@ -113,22 +121,23 @@ def listen(
         """Prepare and paste one committed transcript through Windows output.
 
         output is the already-created Windows paste adapter for the active
-        session. transcript is either a Google final result or the pending
-        preview being committed at session end. source_name labels warnings so
-        logs show which commit path hit a clipboard or keyboard error.
+        session. transcript is a Google final result. source_name labels
+        warnings so logs show which commit path hit a clipboard or keyboard
+        error.
 
-        The transcript first passes through prepare_text() so final commits and
-        session-end preview commits share the same command-word replacement,
-        optional spacing, and backspace-command detection. prepare_text()
-        returns either text to paste or an action such as "backspace"; this
-        function then maps that action to the matching WindowsTextOutput call.
-        OSError is logged and reported without re-raising because clipboard or
-        SendInput failures can be transient, and one failed output attempt
-        should not terminate the recognition session or discard later text.
+        The transcript first passes through prepare_text() so final commits use
+        the same command-word replacement, optional spacing, and backspace-
+        command detection as preview commits handled by PreviewCommitCoordinator.
+        prepare_text() returns either text to paste or an action such as
+        "backspace"; this function then maps that action to the matching
+        WindowsTextOutput call. OSError is logged and reported without
+        re-raising because clipboard or SendInput failures can be transient, and
+        one failed output attempt should not terminate the recognition session or
+        discard later text.
         """
-        # Final commits and explicit session-end preview commits must use the
-        # same command-word and spacing rules. That keeps the preview salvage
-        # path from becoming a second, subtly different text-output pipeline.
+        # Final commits and preview commits must use the same command-word and
+        # spacing rules. The preview branch lives in PreviewCommitCoordinator,
+        # but both paths still rely on prepare_text() before touching Windows.
         text, action = prepare_text(transcript, dictation_settings)
         try:
             if action == "backspace":
@@ -145,15 +154,10 @@ def listen(
     stream_context = None
     last_interim_overlay_time = 0.0
     last_interim_overlay_text = ""
-    # pending_preview_text is the single transcript that session-end preview
-    # paste may commit. Each response calculates latest_interim_transcript from
-    # Google's newest non-final result, then copies it here before any overlay
-    # throttle can skip a redraw. A final result clears this value because the
-    # same spoken segment has been committed through the normal final path; the
-    # finally block can then read this local variable safely after streaming
-    # stops and know that a non-empty value still represents uncommitted preview
-    # text.
-    pending_preview_text = ""
+    # The preview_committer owns pending preview text so the recognition worker
+    # and Enter keyboard hook can coordinate without stopping the session. Each
+    # response still calculates latest_interim_transcript locally, then stores
+    # it before any overlay throttle can skip a redraw.
     # Track the previous one-line console preview width so the next preview or
     # final line can erase trailing characters left by a longer interim result.
     last_console_interim_width = 0
@@ -313,7 +317,25 @@ def listen(
                     # uncommitted text after the final paste happens.
                     on_recognition_text("")
                 last_interim_overlay_text = ""
-                pending_preview_text = ""
+                preview_committer.clear_pending_preview()
+                # A Google response can contain an interim result followed by a
+                # final result for the same spoken segment. Clear the per-
+                # response interim candidate here so the post-loop preview
+                # update cannot resurrect already-finalized text; if Google
+                # includes a new interim after this final in the same response,
+                # the non-final branch above will set it again.
+                latest_interim_transcript = ""
+                latest_interim_result_index = None
+
+                if preview_committer.consume_committed_preview(transcript):
+                    logger.info(
+                        "Skipped final transcript already committed from preview."
+                    )
+                    print(
+                        "Skipped final paste; preview was already committed.",
+                        flush=True,
+                    )
+                    continue
 
                 if not dictation_settings.paste_final:
                     continue
@@ -326,10 +348,10 @@ def listen(
                 if text_output is None:
                     continue
 
-                # Final transcripts are the only text allowed to reach Windows
-                # output during the live stream. Session-end preview paste is
-                # handled in finally so it can only happen after the Google
-                # stream has stopped without a final result.
+                # Final transcripts are the only automatic text allowed to reach
+                # Windows output during the live stream. Preview output during a
+                # live session requires the explicit Enter commit handled by the
+                # PreviewCommitCoordinator.
                 output_prepared_text(text_output, transcript, "Paste")
 
             if latest_interim_transcript:
@@ -341,7 +363,7 @@ def listen(
                 # newer interim transcript. Salvage must be based on the latest
                 # recognition content, not the last painted frame, so an
                 # unexpected stop still has the newest available interim text.
-                pending_preview_text = latest_interim_transcript
+                preview_committer.set_pending_preview(latest_interim_transcript)
 
             if latest_interim_transcript and on_recognition_text is not None:
                 now = time.monotonic()
@@ -400,15 +422,15 @@ def listen(
         # Session-end preview paste runs in finally because only cleanup is past
         # the response loop and knows Google will not emit another final result
         # for this session. The guards are ordered from policy to data to output:
-        # the user must not have disabled it, a non-empty pending_preview_text
-        # must still exist after any normal final result had a chance to clear
-        # it, and a WindowsTextOutput instance must exist because at least one
-        # paste path was enabled. This avoids double-pasting after a normal
-        # final commit while still salvaging an uncommitted preview when the
-        # stream ends.
+        # the user must not have disabled it, the shared preview coordinator
+        # must still hold uncommitted text after any normal final or Enter commit
+        # had a chance to clear it, and a WindowsTextOutput instance must exist
+        # because at least one paste path was enabled. This avoids double-
+        # pasting after a normal final or explicit Enter commit while still
+        # salvaging an uncommitted preview when the stream ends.
         if (
             dictation_settings.paste_preview_on_session_end
-            and pending_preview_text
+            and preview_committer.has_pending_preview()
             and text_output is not None
         ):
             if last_console_interim_width:
@@ -418,14 +440,14 @@ def listen(
                     flush=True,
                 )
                 last_console_interim_width = 0
-            logger.info("Pasting pending preview text at session end.")
-            print(f"SESSION END PREVIEW: {pending_preview_text}", flush=True)
-            output_prepared_text(
-                text_output,
-                pending_preview_text,
+            committed_preview_text = preview_committer.commit_pending_preview(
                 "Session-end preview",
+                clear_overlay=False,
             )
+            if committed_preview_text:
+                print(f"SESSION END PREVIEW: {committed_preview_text}", flush=True)
         if on_recognition_text is not None:
             on_recognition_text("")
         if stream_context is not None:
             stream_context.__exit__(*sys.exc_info())
+        preview_committer.detach()

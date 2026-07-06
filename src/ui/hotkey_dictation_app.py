@@ -2,7 +2,11 @@ import logging
 
 from config import AudioSettings, DictationSettings, FeedbackSettings
 from dictation.dictation_controller import DictationController
-from ui.global_hotkey_listener import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
+from ui.global_hotkey_listener import (
+    GlobalHotkeyListener,
+    HOTKEY_DISPLAY_NAME,
+    PREVIEW_COMMIT_KEY_DISPLAY_NAME,
+)
 from ui.listening_indicator import ListeningIndicator
 
 logger = logging.getLogger(__name__)
@@ -40,7 +44,10 @@ class HotkeyDictationApp:
         print("Press Ctrl+C in this terminal to exit.\n")
 
         try:
-            self.hotkey_listener.run(self.controller.toggle)
+            self.hotkey_listener.run(
+                self.controller.toggle,
+                self.controller.request_preview_commit,
+            )
         finally:
             self.controller.shutdown()
             if self.listening_indicator is not None:
@@ -52,7 +59,10 @@ class HotkeyDictationApp:
             if self.listening_indicator is not None:
                 self.listening_indicator.set_text("")
                 self.listening_indicator.show()
-            print(f"Status: Listening. Press {HOTKEY_DISPLAY_NAME} to pause.")
+            print(
+                f"Status: Listening. Press {HOTKEY_DISPLAY_NAME} to pause, "
+                f"or {PREVIEW_COMMIT_KEY_DISPLAY_NAME} to paste preview."
+            )
         elif status == "Stopping":
             if self.listening_indicator is not None:
                 self.listening_indicator.set_text("")

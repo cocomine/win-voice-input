@@ -20,7 +20,11 @@ from config import (
 )
 from dictation.dictation_controller import DictationController
 from ui.error_dialog import show_error_message
-from ui.global_hotkey_listener import GlobalHotkeyListener, HOTKEY_DISPLAY_NAME
+from ui.global_hotkey_listener import (
+    GlobalHotkeyListener,
+    HOTKEY_DISPLAY_NAME,
+    PREVIEW_COMMIT_KEY_DISPLAY_NAME,
+)
 from ui.listening_indicator import ListeningIndicator
 
 logger = logging.getLogger(__name__)
@@ -52,9 +56,11 @@ class TrayDictationApp:
         feedback_settings: FeedbackSettings,
         config_path: Path,
         log_dir: Path,
+        hotkey_enabled: bool = True,
     ):
         self.config_path = config_path
         self.log_dir = log_dir
+        self.hotkey_enabled = hotkey_enabled
         self.controller = DictationController(
             language,
             audio_settings,
@@ -151,10 +157,14 @@ class TrayDictationApp:
             "Win Voice Input - Idle",
             menu,
         )
-        print(
-            f"Tray icon started. Press {HOTKEY_DISPLAY_NAME} or use the "
-            "tray menu to start or pause."
-        )
+        if self.hotkey_enabled:
+            print(
+                f"Tray icon started. Press {HOTKEY_DISPLAY_NAME} or use the "
+                f"tray menu to start or pause. While listening, press "
+                f"{PREVIEW_COMMIT_KEY_DISPLAY_NAME} to paste preview."
+            )
+        else:
+            print("Tray icon started. Use the tray menu to start or pause.")
         logger.info("Tray icon started.")
         self.icon.run(setup=self._on_setup)
         with self._restart_lock:
@@ -189,26 +199,29 @@ class TrayDictationApp:
         # explicitly mark the tray icon visible here.
         icon.visible = True
 
-        # pystray owns the main UI loop after icon.run(). The hotkey listener
-        # therefore runs in one background thread so the configured shortcut
-        # remains available while the tray menu is open or idle.
-        self._hotkey_thread = threading.Thread(
-            target=self._run_hotkey_listener,
-            daemon=True,
-        )
-        self._hotkey_thread.start()
+        if self.hotkey_enabled:
+            # pystray owns the main UI loop after icon.run(). The hotkey listener
+            # therefore runs in one background thread so the configured shortcut
+            # remains available while the tray menu is open or idle.
+            self._hotkey_thread = threading.Thread(
+                target=self._run_hotkey_listener,
+                daemon=True,
+            )
+            self._hotkey_thread.start()
 
         # Windowed builds intentionally stay in the background after startup.
         # A tray notification confirms that the app is ready and tells the user
         # which control starts dictation, without blocking the tray UI loop.
         try:
-            icon.notify(
-                (
+            if self.hotkey_enabled:
+                message = (
                     f"App is running. Press {HOTKEY_DISPLAY_NAME} or use the "
-                    "tray menu to start voice input."
-                ),
-                self.STARTUP_NOTIFICATION_TITLE,
-            )
+                    "tray menu to start voice input. While listening, press "
+                    f"{PREVIEW_COMMIT_KEY_DISPLAY_NAME} to paste preview."
+                )
+            else:
+                message = "App is running. Use the tray menu to start voice input."
+            icon.notify(message, self.STARTUP_NOTIFICATION_TITLE)
             logger.info("Startup notification shown.")
         except Exception as exc:
             # The startup notification is helpful but not required for
@@ -222,7 +235,10 @@ class TrayDictationApp:
 
     def _run_hotkey_listener(self) -> None:
         try:
-            self.hotkey_listener.run(self.controller.toggle)
+            self.hotkey_listener.run(
+                self.controller.toggle,
+                self.controller.request_preview_commit,
+            )
         except Exception as exc:
             logger.exception("Hotkey listener failed.")
             show_error_message(

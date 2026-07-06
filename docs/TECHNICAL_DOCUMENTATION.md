@@ -4,16 +4,17 @@
 
 ## 1. App 目標
 
-Win Voice Input 是一個 Windows 本機語音輸入工具。它透過 Google Speech-to-Text 串流辨識麥克風音訊，將 interim result 顯示在 overlay listening indicator，等 Google 回傳 final result 後才把文字貼到目前前景應用程式。預設也會在 session 結束但 Google 尚未回傳 final 時貼上最後一段 preview；使用者可以關閉 session-end preview 輸出以恢復 strict final-only 行為。這個設計避免把 Google 仍可能修正的中途文字即時寫入輸入框，同時仍然讓使用者知道目前正在辨識甚麼。
+Win Voice Input 是一個 Windows 本機語音輸入工具。它透過 Google Speech-to-Text 串流辨識麥克風音訊，將 interim result 顯示在 overlay listening indicator，等 Google 回傳 final result 後才把文字貼到目前前景應用程式。聆聽期間使用者也可以按 `Enter` 手動貼上目前 preview，session 會繼續聆聽；預設也會在 session 結束但 Google 尚未回傳 final 時貼上最後一段 preview。使用者可以關閉 session-end preview 輸出，讓自動輸出恢復 final-only；`Enter` 則保留為明確的手動 preview commit。這個設計避免把 Google 仍可能修正的中途文字即時寫入輸入框，同時仍然讓使用者知道目前正在辨識甚麼。
 
 核心行為：
 
 - 以 `Ctrl+Alt+Space` 或 tray menu 開始 / 暫停聆聽。
+- 聆聽期間攔截 `Enter`，貼上目前 pending preview 但不停止 Google stream；Idle 時 `Enter` 直接交還 Windows。
 - 使用 Google STT streaming recognition，語言預設為 `yue-Hant-HK`。
 - 顯示 tray icon 狀態：聆聽時使用綠色 `mic.svg`，非聆聽時使用主題感知的 `mic-mute.svg`。
 - 聆聽時播放 `start.mp3`，停止時播放 `end.mp3`。
 - 聆聽時顯示 Win32 layered overlay，overlay 上顯示 interim transcript。
-- final transcript 經 Windows clipboard + `SendInput(Ctrl+V)` 貼到目前輸入位置；`pastePreviewOnSessionEnd` 預設開啟，所以 session 結束時仍 pending 的 preview 也會走同一條輸出管線。
+- final transcript 經 Windows clipboard + `SendInput(Ctrl+V)` 貼到目前輸入位置；`pastePreviewOnSessionEnd` 預設開啟，所以 session 結束時仍 pending 的 preview 也會走同一條輸出管線。`Enter` preview commit 共享同一個 pending preview coordinator，避免 Enter 提交後又被後續相同 final 重複貼上。
 - 若指定時間內沒有任何辨識文字，預設 5 秒自動停止該次聆聽 session。
 - Settings UI 直接修改 `config.json`，儲存後由主程式重新啟動以載入新設定。
 
@@ -29,9 +30,12 @@ flowchart TB
     Google --> Session
 
     Session -- "interim transcript<br/>rate-limited" --> Indicator["ListeningIndicator<br/>Win32 layered overlay"]
+    Hotkey -- "Enter while listening" --> PreviewCommit["PreviewCommitCoordinator"]
+    Session -- "pending preview" --> PreviewCommit
     Session -- "final transcript" --> Deduper["FinalTranscriptDeduper"]
     Deduper --> Processing["text_processing.prepare_text()"]
     Session -- "session-end preview" --> Processing
+    PreviewCommit -- "manual preview commit" --> Processing
     Processing --> Output["WindowsTextOutput<br/>Clipboard + SendInput"]
     Output --> ActiveApp["Active Windows app"]
 
@@ -95,13 +99,21 @@ classDiagram
         +start()
         +stop()
         +toggle()
+        +request_preview_commit(should_commit)
         +shutdown()
         -_run_listening_session()
         -_set_status(status)
     }
 
+    class PreviewCommitCoordinator {
+        +attach(text_output, settings, callback)
+        +set_pending_preview(transcript)
+        +commit_pending_preview(source_name)
+        +consume_committed_preview(transcript)
+    }
+
     class GlobalHotkeyListener {
-        +run(on_toggle)
+        +run(on_toggle, on_preview_commit_key)
         +stop()
     }
 
@@ -148,6 +160,7 @@ classDiagram
     DictationController --> AudioSettings
     DictationController --> DictationSettings
     DictationController --> FeedbackSettings
+    DictationController --> PreviewCommitCoordinator
     DictationController --> MicrophoneStream
     DictationController --> FinalTranscriptDeduper
     DictationController --> WindowsTextOutput
@@ -161,7 +174,7 @@ flowchart LR
     subgraph MainProcess["WinVoiceInput.exe / python voice_input.py"]
         Main["Main thread<br/>argument parsing, config, logging"]
         TrayLoop["pystray UI loop<br/>tray menu and icon"]
-        HotkeyThread["Hotkey thread<br/>RegisterHotKey + GetMessageW"]
+        HotkeyThread["Hotkey thread<br/>RegisterHotKey + WH_KEYBOARD_LL + GetMessageW"]
         DictationWorker["Dictation worker thread<br/>Google streaming_recognize"]
         PortAudio["PortAudio callback thread<br/>raw microphone chunks"]
         OverlayThread["Overlay Win32 message thread<br/>layered window + timer"]
@@ -185,7 +198,7 @@ flowchart LR
 
 ### Thread 設計原因
 
-- Tray loop 需要保持 responsive，所以 hotkey、Google STT、overlay window 都不可阻塞 tray main loop。
+- Tray loop 需要保持 responsive，所以 hotkey / Enter hook、Google STT、overlay window 都不可阻塞 tray main loop。
 - Google STT streaming 是同步 iterator 形態，因此放在 `DictationController` 的 worker thread。
 - `sounddevice.RawInputStream` 由 PortAudio callback 推送 bytes 到 queue，避免在 audio callback 內做網絡或文字處理。
 - Overlay 使用 Win32 window message loop，必須在自己的 thread 管理 `CreateWindowExW`、timer、`UpdateLayeredWindow`。
@@ -237,7 +250,7 @@ flowchart TD
     HasResult -- "Yes" --> Final{"result.is_final?"}
 
     Final -- "No" --> LatestInterim["Keep latest non-final transcript in response"]
-    LatestInterim --> PendingPreview["Store pending preview for session-end paste"]
+    LatestInterim --> PendingPreview["Store pending preview for Enter / session-end paste"]
     PendingPreview --> RateLimit{"Changed and >= 0.35s?"}
     RateLimit -- "Yes" --> Overlay["Update overlay text"]
     RateLimit -- "No" --> Responses
@@ -321,7 +334,7 @@ sequenceDiagram
 
 ### 8.2 Tray / Hotkey 控制
 
-Tray mode 使用 `pystray` 顯示 icon、menu、startup notification。`GlobalHotkeyListener` 使用 Win32 `RegisterHotKey` 註冊 `Ctrl+Alt+Space`，並用 `GetMessageW` 等待 `WM_HOTKEY`，收到後呼叫 `DictationController.toggle()`。
+Tray mode 使用 `pystray` 顯示 icon、menu、startup notification。只有 `hotkey` 設定啟用時，tray app 才會啟動 `GlobalHotkeyListener`。Listener 使用 Win32 `RegisterHotKey` 註冊 `Ctrl+Alt+Space`，並用 `GetMessageW` 等待 `WM_HOTKEY`，收到後呼叫 `DictationController.toggle()`。同一個 listener 也安裝 `WH_KEYBOARD_LL` low-level keyboard hook 觀察 `Enter`；callback 只有在 `DictationController` 仍是 `Listening`，且至少一條輸出路徑仍啟用時，才吞掉 Enter keydown/keyup，並只在 keydown 啟動 preview commit。Idle、Stopping、no-output run 或其他狀態會呼叫 `CallNextHookEx` 交還 Windows，避免影響一般 Enter 功能。
 
 Tray icon 狀態由 controller callback 更新：
 
@@ -350,7 +363,7 @@ Google response 可能在同一 response 內包含多個 result。程式只把�
 
 ### 8.5 Interim Preview
 
-Interim text 在聆聽期間只會送到 `ListeningIndicator.set_text()`，不會即時貼入 active app。更新有 `0.35s` rate limit，而且必須 text changed。這樣可避免 Google interim result 每秒多次修正時令 overlay 閃動太頻密。因為 `pastePreviewOnSessionEnd` 預設啟用，`listen()` 會另外記住最新 non-final transcript；如果 session 結束前沒有 final result 清空這段 pending preview，才會在 cleanup 階段用同一條 `prepare_text()` / `WindowsTextOutput` 管線貼上。手動按 `Ctrl+Alt+Space` 暫停時，已經由 Google 交付的 response 會先完成 final / interim 處理，然後才退出 streaming loop，避免把手動停止當刻的最新 preview 丟掉。
+Interim text 在聆聽期間只會送到 `ListeningIndicator.set_text()`，不會即時貼入 active app。更新有 `0.35s` rate limit，而且必須 text changed。這樣可避免 Google interim result 每秒多次修正時令 overlay 閃動太頻密。`listen()` 會把最新 non-final transcript 存入 `PreviewCommitCoordinator`；按 `Enter` 時，hotkey thread 會要求 coordinator 用同一條 `prepare_text()` / `WindowsTextOutput` 管線貼上目前 pending preview，但不設定 `stop_event`，所以 Google stream 會繼續。若 Google 之後回傳完全相同的 final，coordinator 會消耗已提交 preview key 並跳過該 final，避免重複貼上；若 final 內容不同，仍交給現有 final paste 管線。因為 `pastePreviewOnSessionEnd` 預設啟用，如果 session 結束前沒有 final result 或 Enter commit 清空這段 pending preview，cleanup 階段也會用同一條 preview commit 管線貼上。手動按 `Ctrl+Alt+Space` 暫停時，已經由 Google 交付的 response 會先完成 final / interim 處理，然後才退出 streaming loop，避免把手動停止當刻的最新 preview 丟掉。
 
 Overlay 的文字使用 CJK-capable Windows font，如 Microsoft JhengHei / Microsoft YaHei / MingLiU，避免中文變成方框。長文字會做 leading ellipsis，保留最新識別到的尾段文字，因為使用者最需要確認目前正在說的內容。
 
@@ -433,6 +446,7 @@ Overlay 的文字使用 CJK-capable Windows font，如 Microsoft JhengHei / Micr
 | --- | --- |
 | `src/dictation/dictation_controller.py` / `DictationController` | 統一 start / stop / toggle / shutdown lifecycle；播放 status sound；在 worker thread 執行 listening session；回報 UI status。 |
 | `src/dictation/dictation_session.py` / `listen()` | Google STT streaming 主流程；處理 interim/final、idle timer、console preview、overlay text callback、final paste。 |
+| `src/dictation/preview_commit_coordinator.py` / `PreviewCommitCoordinator` | 共享 pending preview 狀態；讓 Enter commit、session-end preview paste 和 later final duplicate suppression 使用同一個 preview commit 邊界。 |
 | `src/dictation/final_transcript_deduper.py` / `FinalTranscriptDeduper` | 時間窗內避免同一 final transcript 重複輸出。 |
 | `src/dictation/text_processing.py` / `prepare_text()`、`add_spacing()` | 處理 command words、backspace command、punctuation replacement、optional final spacing。 |
 | `src/dictation/__init__.py` | Package marker。 |
@@ -450,7 +464,7 @@ Overlay 的文字使用 CJK-capable Windows font，如 Microsoft JhengHei / Micr
 | --- | --- |
 | `src/ui/tray_dictation_app.py` / `TrayDictationApp` | Tray shell。管理 pystray icon/menu、hotkey thread、overlay、settings child process、restart、logs/config folder action。 |
 | `src/ui/hotkey_dictation_app.py` / `HotkeyDictationApp` | Console hotkey shell。用同一 controller + hotkey listener，無 tray。 |
-| `src/ui/global_hotkey_listener.py` / `GlobalHotkeyListener` | Win32 global hotkey registration 和 message loop；只負責把 `Ctrl+Alt+Space` 轉成 callback。 |
+| `src/ui/global_hotkey_listener.py` / `GlobalHotkeyListener` | Win32 global hotkey registration、low-level keyboard hook 和 message loop；把 `Ctrl+Alt+Space` 轉成 toggle callback，並只在 Listening 時攔截 `Enter` preview commit。 |
 | `src/ui/listening_indicator.py` / `ListeningIndicator` | Win32 layered overlay。負責顯示聆聽狀態、interim text、enter/exit animation、halo pulse、CJK font rendering。 |
 | `src/ui/config_editor_window.py` / `ConfigEditorWindow` | PySide6 Settings UI。讀寫 `config.json`、列 microphone、驗證 Google credentials、設定 HKCU Run startup。 |
 | `src/ui/error_dialog.py` / `show_error_message()` | Win32 message box wrapper，用於 windowed build 的啟動 / runtime 錯誤提示。 |
@@ -470,6 +484,7 @@ Overlay 的文字使用 CJK-capable Windows font，如 Microsoft JhengHei / Micr
 | `src/win32_types/input.py` / `INPUT` | `SendInput` 需要的 top-level input structure。 |
 | `src/win32_types/input_union.py` / `INPUT_UNION` | 包含 mouse / keyboard / hardware input branch。 |
 | `src/win32_types/keybd_input.py` / `KEYBDINPUT` | 鍵盤事件 layout，用於 Ctrl+V 和 Backspace。 |
+| `src/win32_types/kbdllhook_struct.py` / `KBDLLHOOKSTRUCT` | `WH_KEYBOARD_LL` hook callback 的 keyboard event layout，用於辨識 Enter keydown/keyup。 |
 | `src/win32_types/mouse_input.py` / `MOUSEINPUT` | 主要為保持 `INPUT_UNION` 正確大小，避免 `SendInput` WinError 87。 |
 | `src/win32_types/msg.py` / `MSG` | `GetMessageW` 共用 message structure，hotkey 和 overlay 都依賴它。 |
 | `src/win32_types/point.py` / `POINT` | Win32 coordinate structure。 |

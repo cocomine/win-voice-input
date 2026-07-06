@@ -3,6 +3,7 @@ import io
 import sys
 import threading
 import unittest
+from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,6 +16,7 @@ if str(SRC_DIR) not in sys.path:
 
 from config import AudioSettings, DictationSettings  # noqa: E402
 import dictation.dictation_session as session  # noqa: E402
+from dictation.preview_commit_coordinator import PreviewCommitCoordinator  # noqa: E402
 
 
 def make_result(transcript: str, *, is_final: bool) -> SimpleNamespace:
@@ -47,10 +49,12 @@ class FakeMicrophoneStream:
 class DictationSessionStopTests(unittest.TestCase):
     def run_session_with_responses(
         self,
-        responses: list[SimpleNamespace],
+        responses: Iterable[SimpleNamespace],
         *,
         paste_final: bool,
         paste_preview_on_session_end: bool,
+        stop_event_set: bool = True,
+        preview_commit_coordinator: PreviewCommitCoordinator | None = None,
     ) -> tuple[list[str], list[str]]:
         pasted_text: list[str] = []
         overlay_text: list[str] = []
@@ -70,7 +74,8 @@ class DictationSessionStopTests(unittest.TestCase):
         # These tests model the race that happens when Ctrl+Alt+Space stops the
         # session while Google has already delivered one more response. The
         # response must still be processed before listen() leaves the stream.
-        stop_event.set()
+        if stop_event_set:
+            stop_event.set()
 
         with (
             patch.object(session.speech, "SpeechClient", FakeSpeechClient),
@@ -92,6 +97,7 @@ class DictationSessionStopTests(unittest.TestCase):
                 ),
                 stop_event,
                 overlay_text.append,
+                preview_commit_coordinator,
             )
 
         return pasted_text, overlay_text
@@ -143,6 +149,34 @@ class DictationSessionStopTests(unittest.TestCase):
 
         self.assertEqual(pasted_text, [])
         self.assertEqual(overlay_text, ["preview should stay visible only", ""])
+
+    def test_enter_preview_commit_skips_matching_later_final(self):
+        preview_commit_coordinator = PreviewCommitCoordinator()
+        interim_response = SimpleNamespace(
+            results=[make_result("manual preview", is_final=False)]
+        )
+        final_response = SimpleNamespace(
+            results=[make_result("manual preview", is_final=True)]
+        )
+
+        def responses():
+            yield interim_response
+            self.assertEqual(
+                preview_commit_coordinator.commit_pending_preview("Enter preview"),
+                "manual preview",
+            )
+            yield final_response
+
+        pasted_text, overlay_text = self.run_session_with_responses(
+            responses(),
+            paste_final=True,
+            paste_preview_on_session_end=True,
+            stop_event_set=False,
+            preview_commit_coordinator=preview_commit_coordinator,
+        )
+
+        self.assertEqual(pasted_text, ["manual preview"])
+        self.assertEqual(overlay_text[0:2], ["manual preview", ""])
 
 
 if __name__ == "__main__":

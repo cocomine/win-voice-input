@@ -5,6 +5,7 @@ from win32_types.blend_function import BLENDFUNCTION
 from win32_types.hardware_input import HARDWAREINPUT
 from win32_types.input import INPUT
 from win32_types.input_union import INPUT_UNION
+from win32_types.kbdllhook_struct import KBDLLHOOKSTRUCT
 from win32_types.keybd_input import KEYBDINPUT
 from win32_types.mouse_input import MOUSEINPUT
 from win32_types.msg import MSG
@@ -22,6 +23,7 @@ __all__ = [
     "HARDWAREINPUT",
     "INPUT",
     "INPUT_UNION",
+    "KBDLLHOOKSTRUCT",
     "KEYBDINPUT",
     "LRESULT",
     "MOUSEINPUT",

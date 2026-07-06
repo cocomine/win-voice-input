@@ -34,7 +34,10 @@ from ui.error_dialog import (
     MESSAGE_BOX_YES_NO,
     show_error_message,
 )
-from ui.global_hotkey_listener import HOTKEY_DISPLAY_NAME
+from ui.global_hotkey_listener import (
+    HOTKEY_DISPLAY_NAME,
+    PREVIEW_COMMIT_KEY_DISPLAY_NAME,
+)
 from ui.hotkey_dictation_app import HotkeyDictationApp
 
 IMMEDIATE_MODE_STATUS_POLL_SECONDS = 0.1
@@ -52,7 +55,9 @@ def main() -> int:
         description="Stream microphone audio to Google Speech-to-Text.",
         epilog=(
             f"Shortcut note: current builds use {HOTKEY_DISPLAY_NAME}; this "
-            "restores the original shortcut after a short Ctrl+Alt+V test build."
+            "restores the original shortcut after a short Ctrl+Alt+V test build. "
+            f"While listening, {PREVIEW_COMMIT_KEY_DISPLAY_NAME} pastes the "
+            "current preview without stopping the session."
         ),
     )
     parser.add_argument(
@@ -112,7 +117,10 @@ def main() -> int:
         dest="hotkey",
         default=None,
         action="store_false",
-        help=f"Do not use global {HOTKEY_DISPLAY_NAME} hotkey mode.",
+        help=(
+            f"Do not use global {HOTKEY_DISPLAY_NAME} toggle or listening-only "
+            f"{PREVIEW_COMMIT_KEY_DISPLAY_NAME} preview commit mode."
+        ),
     )
     parser.add_argument(
         "--no-tray",
@@ -570,6 +578,7 @@ def main() -> int:
                 feedback_settings,
                 config_path,
                 log_dir,
+                bool(settings["hotkey"]),
             ).run()
         elif settings["hotkey"]:
             logging.info("Starting console hotkey mode.")

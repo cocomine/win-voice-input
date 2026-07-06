@@ -2,7 +2,7 @@ import ctypes
 from collections.abc import Callable
 from ctypes import wintypes
 
-from win32_types import MSG
+from win32_types import KBDLLHOOKSTRUCT, LRESULT, MSG
 
 
 HOTKEY_ID_TOGGLE_LISTENING = 1
@@ -10,13 +10,28 @@ HOTKEY_ID_TOGGLE_LISTENING = 1
 # a short Ctrl+Alt+V test build. Keeping the toggle away from Ctrl+V reduces the
 # chance of confusing normal paste behavior while dictating into active apps.
 HOTKEY_DISPLAY_NAME = "Ctrl+Alt+Space"
+PREVIEW_COMMIT_KEY_DISPLAY_NAME = "Enter"
+HC_ACTION = 0
+WH_KEYBOARD_LL = 13
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
+VK_RETURN = 0x0D
 VK_SPACE = 0x20
+WM_KEYDOWN = 0x0100
+WM_KEYUP = 0x0101
+WM_SYSKEYDOWN = 0x0104
+WM_SYSKEYUP = 0x0105
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
 
 HotkeyCallback = Callable[[], None]
+PreviewCommitKeyCallback = Callable[[bool], bool]
+LowLevelKeyboardProc = ctypes.WINFUNCTYPE(
+    LRESULT,
+    ctypes.c_int,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+)
 
 
 class GlobalHotkeyListener:
@@ -27,11 +42,13 @@ class GlobalHotkeyListener:
         self._user32 = ctypes.windll.user32
         self._kernel32 = ctypes.windll.kernel32
         self._thread_id: int | None = None
+        self._on_preview_commit_key: PreviewCommitKeyCallback | None = None
+        self._keyboard_proc = LowLevelKeyboardProc(self._handle_keyboard_event)
 
         # ctypes signatures are declared here because this module owns hotkey
-        # registration and dispatch. MSG comes from a shared module because
-        # GetMessageW argtypes are shared with the listening indicator through
-        # ctypes.windll.user32.
+        # registration, keyboard-hook dispatch, and teardown. MSG and
+        # KBDLLHOOKSTRUCT come from shared modules because ctypes.windll.user32
+        # stores argtypes process-wide.
         self._user32.RegisterHotKey.argtypes = [
             wintypes.HWND,
             ctypes.c_int,
@@ -55,12 +72,36 @@ class GlobalHotkeyListener:
             wintypes.LPARAM,
         ]
         self._user32.PostThreadMessageW.restype = wintypes.BOOL
+        self._user32.SetWindowsHookExW.argtypes = [
+            ctypes.c_int,
+            LowLevelKeyboardProc,
+            wintypes.HANDLE,
+            wintypes.DWORD,
+        ]
+        self._user32.SetWindowsHookExW.restype = wintypes.HANDLE
+        self._user32.UnhookWindowsHookEx.argtypes = [wintypes.HANDLE]
+        self._user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+        self._user32.CallNextHookEx.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+        ]
+        self._user32.CallNextHookEx.restype = LRESULT
         self._kernel32.GetCurrentThreadId.argtypes = []
         self._kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+        self._kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+        self._kernel32.GetModuleHandleW.restype = wintypes.HANDLE
 
-    def run(self, on_toggle: HotkeyCallback) -> None:
+    def run(
+        self,
+        on_toggle: HotkeyCallback,
+        on_preview_commit_key: PreviewCommitKeyCallback | None = None,
+    ) -> None:
         self._thread_id = self._kernel32.GetCurrentThreadId()
+        self._on_preview_commit_key = on_preview_commit_key
         hotkey_registered = False
+        keyboard_hook = None
 
         try:
             # RegisterHotKey asks Windows to deliver the configured shortcut
@@ -75,6 +116,20 @@ class GlobalHotkeyListener:
             ):
                 raise ctypes.WinError()
             hotkey_registered = True
+
+            if self._on_preview_commit_key is not None:
+                # The low-level hook is installed for the app lifetime, but its
+                # callback only consumes Enter while DictationController reports
+                # an active Listening session. Idle key events are passed to
+                # Windows unchanged, so normal Enter behavior is not affected.
+                keyboard_hook = self._user32.SetWindowsHookExW(
+                    WH_KEYBOARD_LL,
+                    self._keyboard_proc,
+                    self._kernel32.GetModuleHandleW(None),
+                    0,
+                )
+                if not keyboard_hook:
+                    raise ctypes.WinError()
 
             msg = MSG()
             while True:
@@ -93,9 +148,34 @@ class GlobalHotkeyListener:
                 ):
                     on_toggle()
         finally:
+            if keyboard_hook:
+                self._user32.UnhookWindowsHookEx(keyboard_hook)
             if hotkey_registered:
                 self._user32.UnregisterHotKey(None, HOTKEY_ID_TOGGLE_LISTENING)
+            self._on_preview_commit_key = None
             self._thread_id = None
+
+    def _handle_keyboard_event(
+        self,
+        n_code: int,
+        w_param: int,
+        l_param: int,
+    ) -> int:
+        if n_code == HC_ACTION:
+            keyboard_event = ctypes.cast(
+                l_param,
+                ctypes.POINTER(KBDLLHOOKSTRUCT),
+            ).contents
+            is_enter_event = (
+                keyboard_event.vkCode == VK_RETURN
+                and w_param
+                in (WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP)
+            )
+            if is_enter_event and self._on_preview_commit_key is not None:
+                should_commit = w_param in (WM_KEYDOWN, WM_SYSKEYDOWN)
+                if self._on_preview_commit_key(should_commit):
+                    return 1
+        return self._user32.CallNextHookEx(None, n_code, w_param, l_param)
 
     def stop(self) -> None:
         if self._thread_id is None:

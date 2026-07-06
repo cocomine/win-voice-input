@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -12,6 +13,7 @@ from config import (
     get_asset_dir,
 )
 from dictation.dictation_session import listen
+from dictation.preview_commit_coordinator import PreviewCommitCoordinator
 from ui.error_dialog import show_error_message
 
 if TYPE_CHECKING:
@@ -48,6 +50,7 @@ class DictationController:
         self.on_status_change = on_status_change
         self.on_recognition_text = on_recognition_text
         self.status = "Idle"
+        self._preview_commit_coordinator = PreviewCommitCoordinator()
         self._sound_error: type[Exception] | None = None
         self._start_sound: "pygame.mixer.Sound | None" = None
         self._end_sound: "pygame.mixer.Sound | None" = None
@@ -132,6 +135,39 @@ class DictationController:
         else:
             self.start()
 
+    def request_preview_commit(self, should_commit: bool) -> bool:
+        with self._lock:
+            listening = (
+                self.status == "Listening"
+                and self._worker is not None
+                and self._worker.is_alive()
+            )
+        if not listening:
+            return False
+
+        # A true no-output run should not steal Enter from the active app. The
+        # preview commit key is only captured when at least one paste path is
+        # enabled, matching the same output policy used by listen().
+        if not (
+            self.dictation_settings.paste_final
+            or self.dictation_settings.paste_preview_on_session_end
+        ):
+            return False
+
+        if not should_commit:
+            return True
+
+        # The low-level keyboard hook must return quickly or Windows can remove
+        # it. Commit the current preview on a short-lived worker so Enter is
+        # swallowed immediately while clipboard and SendInput work happen away
+        # from the hook callback.
+        threading.Thread(
+            target=self._preview_commit_coordinator.commit_pending_preview,
+            args=("Enter preview",),
+            daemon=True,
+        ).start()
+        return True
+
     def shutdown(self) -> None:
         self.stop()
         if self._worker is not None and self._worker.is_alive():
@@ -145,6 +181,7 @@ class DictationController:
                 self.dictation_settings,
                 self._stop_event,
                 self.on_recognition_text,
+                self._preview_commit_coordinator,
             )
         except Exception as exc:
             logger.exception("Dictation session failed.")
