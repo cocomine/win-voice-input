@@ -314,14 +314,6 @@ def listen(
                     on_recognition_text("")
                 last_interim_overlay_text = ""
                 pending_preview_text = ""
-                # A Google response can contain an interim result followed by a
-                # final result for the same spoken segment. Clear the per-
-                # response interim candidate here so the post-loop salvage step
-                # cannot resurrect already-finalized text; if Google includes a
-                # new interim after this final in the same response, the non-
-                # final branch below will set it again.
-                latest_interim_transcript = ""
-                latest_interim_result_index = None
 
                 if not dictation_settings.paste_final:
                     continue

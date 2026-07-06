@@ -570,16 +570,11 @@ powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\pa
 powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -Language en-US
 ```
 
-Console-safe / no-output mode：
+Console-only mode：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -NoPasteFinal -NoPastePreviewOnSessionEnd
+powershell -ExecutionPolicy Bypass -File .\run-dictation.ps1 -Credentials "D:\path\to\service-account.json" -NoPasteFinal
 ```
-
-`-NoPasteFinal` only disables normal final transcript paste. Because
-`pastePreviewOnSessionEnd` defaults on to salvage short utterances, use
-`-NoPastePreviewOnSessionEnd` as well when the run must not write any recognized
-text into the active app.
 
 不使用 tray：
 
